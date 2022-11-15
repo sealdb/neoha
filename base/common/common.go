@@ -1,5 +1,5 @@
 /*
- * Copyright 2022 The NeoHA Authors.
+ * Copyright 2022-2025 The NeoHA Authors.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -16,8 +16,10 @@
 package common
 
 import (
+	"math/rand"
 	"os"
 	"path"
+	"time"
 )
 
 type (
@@ -48,4 +50,51 @@ func PathExists(path string) (bool, error) {
 func GetFileType(filepath string) FileType {
 	fileType := path.Ext(path.Base(filepath))
 	return FileType(fileType)
+}
+
+func RandomTimeout(min int) *time.Timer {
+	var max int
+	if min <= 5 {
+		max = min * 2
+	} else if min <= 20 {
+		max = min + min/2
+	} else {
+		max = min + 10
+	}
+	rand := rand.New(rand.NewSource(time.Now().UnixNano()))
+	d, delta := min, (max - min)
+	if delta > 0 {
+		d += rand.Intn(int(delta))
+	}
+	return time.NewTimer(time.Duration(d) * time.Millisecond)
+}
+
+func RandomPort(min int, max int) int {
+	rand := rand.New(rand.NewSource(time.Now().UnixNano()))
+	d, delta := min, (max - min)
+	if delta > 0 {
+		d += rand.Intn(int(delta))
+	}
+	return d
+}
+
+func NormalTimeout(d int) *time.Timer {
+	return time.NewTimer(time.Duration(d) * time.Millisecond)
+}
+
+func NormalTimerRelaese(t *time.Timer) {
+	if t == nil {
+		return
+	}
+
+	if !t.Stop() {
+		select {
+		case <-t.C:
+		default:
+		}
+	}
+}
+
+func NormalTicker(d int) *time.Ticker {
+	return time.NewTicker(time.Duration(d) * time.Millisecond)
 }

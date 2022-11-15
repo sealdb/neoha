@@ -1,5 +1,5 @@
 /*
- * Copyright 2022 The NeoHA Authors.
+ * Copyright 2022-2025 The NeoHA Authors.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -16,8 +16,19 @@
 package model
 
 const (
-	OK              = "OK"
-	ErrorRPCCall    = "ErrorRpcCall"
-	ErrorPGDown     = "ErrorPGDown"
-	ErrorServerDown = "ErrorServerDown"
+	OK                    = "OK"
+	ErrorRPCCall          = "ErrorRpcCall"
+	ErrorMySQLDown        = "ErrorMySQLDown"
+	ErrorServerDown       = "ErrorServerDown"
+	ErrorInvalidGTID      = "ErrorInvalidGTID"
+	ErrorInvalidViewID    = "ErrorInvalidViewID"
+	ErrorVoteNotGranted   = "ErrorVoteNotGranted"
+	ErrorInvalidRequest   = "ErrorInvalidRequest"
+	ErrorChangeMaster     = "ErrorChangeMaster"
+	ErrorBackupNotFound   = "ErrorBackupNotFound"
+	ErrorMysqldNotRunning = "ErrorMysqldNotRunning"
+)
+
+const (
+	RPCError_MySQLUnpromotable = "RPCError_MySQLUnpromotable"
 )

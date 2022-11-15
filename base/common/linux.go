@@ -1,5 +1,5 @@
 /*
- * Copyright 2022 The NeoHA Authors.
+ * Copyright 2022-2025 The NeoHA Authors.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -19,13 +19,15 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"github.com/pkg/errors"
 	"io"
-	"neoha/base/nlog"
 	"os/exec"
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"neoha/base/nlog"
+
+	"github.com/pkg/errors"
 )
 
 func RunCommand(cmds string, args ...string) (string, error) {

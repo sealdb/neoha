@@ -15,7 +15,9 @@
 PREFIX    :=/usr/local
 #export GOPROXY=https://goproxy.cn
 export PATH := $(GOPATH)/bin:$(PATH)
+export LDFLAGS :=
 COVERAGE_OUT := coverage.out
+COVERAGE_LOG := coverage.log
 
 .PHONY:build
 
@@ -46,30 +48,52 @@ test:
 	@echo "--> Testing..."
 	@$(MAKE) testbase
 	@$(MAKE) testconfig
+	@$(MAKE) testdatabase
+	@$(MAKE) testmanager
+	@$(MAKE) testelection
+	@$(MAKE) testserver
 	@$(MAKE) testcmd
-	#@$(MAKE) testserver
-	@$(MAKE) testneoha
 
 testbase:
 	go test -v neoha/base/common
 	go test -v neoha/base/nlog
+	go test -v neoha/base/nrpc
 testconfig:
 	go test -v neoha/config
-testcmd:
-	go test -v neoha/cmd/neohactl
+testdatabase:
+	go test -v neoha/database/mysql
+	# go test -v neoha/database/postgresql
+testmanager:
+	go test -v neoha/manager/mysqld
+	# gp test -v neoha/manager/postmaster
+testelection:
+	go test -v neoha/election/raft
+	# go test -v neoha/election/etcd
 testserver:
 	go test -v neoha/server
-testneoha:
-	go test -v neoha/neoha
+testcmd:
+	go test -v neoha/cmd/neohactl
+	go test -v neoha/api/v1
 
-COVPKGS = base/nlog\
-		  config\
-		  cmd/neohactl\
-          neoha
+PKGS = 	base/common \
+		base/nlog \
+		base/nrpc \
+		config \
+		database/mysql \
+		manager/mysqld \
+		election/raft \
+		server \
+		cmd/neohactl \
+		api/v1
+		#database/postgresql \
+		#manager/postmaster \
+		#election/etcd \
 
 vet:
-	go vet $(COVPKGS)
+	go vet $(PKGS)
 
 coverage:
-	go test -v -covermode=set -coverprofile=${COVERAGE_OUT} ./...
+	#echo > ${COVERAGE_LOG}
+	go test -v -covermode=set -coverprofile=${COVERAGE_OUT} ./... #| tee -a ${COVERAGE_LOG}
+	#grep "FAIL:" ${COVERAGE_LOG} ; if [[ $? -eq 0 ]]; then exit 1 ; fi
 	go tool cover -html=${COVERAGE_OUT}

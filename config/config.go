@@ -1,5 +1,5 @@
 /*
- * Copyright 2022 The NeoHA Authors.
+ * Copyright 2022-2025 The NeoHA Authors.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -17,12 +17,14 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/pkg/errors"
+	"os"
+
 	"neoha/base/common"
 
 	//"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
-	"io/ioutil"
 )
 
 var (
@@ -42,6 +44,7 @@ func DefaultAuthenticationConfig() *AuthenticationConfig {
 }
 
 type RestAPIConfig struct {
+	EnableAPIs     bool                  `yaml:"enable-apis" json:"enable-apis"`         // true or fase
 	Listen         string                `yaml:"listen" json:"listen"`                   // ip:port
 	ConnectAddress string                `yaml:"connect_address" json:"connect_address"` // ip:port
 	Certfile       string                `yaml:"certfile" json:"certfile"`
@@ -101,16 +104,67 @@ func DefaultEtcdConfig() *EtcdConfig {
 }
 
 type RaftConfig struct {
-	DataDir      string   `yaml:"data_dir" json:"data_dir"`
-	SelfAddr     string   `yaml:"self_addr" json:"self_addr"`
-	PartnerAddrs []string `yaml:"partner_addrs" json:"partner_addrs"`
+	// raft meta datadir
+	MetaDatadir string `yaml:"meta-datadir" json:"meta-datadir"`
+
+	// leader heartbeat interval(ms)
+	HeartbeatTimeout int `yaml:"heartbeat-timeout" json:"heartbeat-timeout"`
+
+	// admit defeat count for hearbeat
+	AdmitDefeatHtCnt int `yaml:"admit-defeat-hearbeat-count" json:"admit-defeat-hearbeat-count"`
+
+	// election timeout(ms)
+	ElectionTimeout int `yaml:"election-timeout" json:"election-timeout"`
+
+	// purge binlog interval (ms)
+	PurgeBinlogInterval int `yaml:"purge-binlog-interval" json:"purge-binlog-interval"`
+
+	// Super IDLE can't change to FOLLOWER.
+	SuperIDLE bool `yaml:"super-idle" json:"super-idle"`
+
+	// MUST: set in init
+	// the shell command when leader start
+	LeaderStartCommand string `yaml:"leader-start-command" json:"leader-start-command"`
+
+	// MUST: set in init
+	// the shell command when leader stop
+	LeaderStopCommand string `yaml:"leader-stop-command" json:"leader-stop-command"`
+
+	// if true, neoha binlog-purge will be skipped, default is false.
+	PurgeBinlogDisabled bool `yaml:"purge-binlog-disabled" json:"purge-binlog-disabled"`
+
+	// rpc client request tiemout(ms)
+	RequestTimeout int
+
+	// candicate wait timeout(ms) for 2 nodes.
+	CandidateWaitFor2Nodes int `yaml:"candidate-wait-for-2nodes" json:"candidate-wait-for-2nodes"`
 }
 
 func DefaultRaftConfig() *RaftConfig {
 	return &RaftConfig{
-		DataDir:      ".",
-		SelfAddr:     "127.0.0.1:8801",
-		PartnerAddrs: []string{},
+		MetaDatadir:            ".",
+		HeartbeatTimeout:       1000,
+		AdmitDefeatHtCnt:       10,
+		ElectionTimeout:        3000,
+		PurgeBinlogInterval:    1000 * 60 * 5,
+		LeaderStartCommand:     "nop",
+		LeaderStopCommand:      "nop",
+		RequestTimeout:         1000,
+		CandidateWaitFor2Nodes: 1000 * 60,
+	}
+}
+
+type ElectionConfig struct {
+	Algo string      `yaml:"algorithm" json:"algorithm"`
+	Raft *RaftConfig `yaml:"raft" json:"raft"`
+	Etcd *EtcdConfig `yaml:"etcd" json:"etcd"`
+}
+
+func DefaultElectionConfig() *ElectionConfig {
+	return &ElectionConfig{
+		Algo: "raft",
+		Raft: DefaultRaftConfig(),
+		Etcd: DefaultEtcdConfig(),
 	}
 }
 
@@ -136,10 +190,17 @@ func DefaultRecoveryConfConfig() *RecoveryConfConfig {
 	return &RecoveryConfConfig{}
 }
 
-type DcsPostgresqlConfig struct {
-	UsePGRewind bool              `yaml:"use_pg_rewind" json:"use_pg_rewind"`
-	UseSlots    bool              `yaml:"use_slots" json:"use_slots"`
-	Parameters  map[string]string `yaml:"parameters" json:"parameters"`
+type DcsConfig struct {
+	TTL                  int                   `yaml:"ttl" json:"ttl"`
+	LoopWait             int                   `yaml:"loop_wait" json:"loop_wait"`
+	RetryTimeout         int                   `yaml:"retry_timeout" json:"retry_timeout"`
+	MaximumLagOnFailover int                   `yaml:"maximum_lag_on_failover" json:"maximum_lag_on_failover"`
+	MasterStartTimeout   int                   `yaml:"master_start_timeout" json:"master_start_timeout"`
+	SynchronousMode      bool                  `yaml:"synchronous_mode" json:"synchronous_mode"`
+	StandbyCluster       *StandbyClusterConfig `yaml:"standby_cluster" json:"standby_cluster"`
+	UsePGRewind          bool                  `yaml:"use_pg_rewind" json:"use_pg_rewind"`
+	UseSlots             bool                  `yaml:"use_slots" json:"use_slots"`
+	Parameters           map[string]string     `yaml:"parameters" json:"parameters"`
 	/*
 	   wal_level: hot_standby
 	   hot_standby: "on"
@@ -159,26 +220,6 @@ type DcsPostgresqlConfig struct {
 	RecoveryConf *RecoveryConfConfig `yaml:"recovery_conf" json:"recovery_conf"`
 }
 
-func DefaultDcsPostgresqlConfig() *DcsPostgresqlConfig {
-	return &DcsPostgresqlConfig{
-		UsePGRewind:  true,
-		UseSlots:     true,
-		Parameters:   map[string]string{},
-		RecoveryConf: DefaultRecoveryConfConfig(),
-	}
-}
-
-type DcsConfig struct {
-	TTL                  int                   `yaml:"ttl" json:"ttl"`
-	LoopWait             int                   `yaml:"loop_wait" json:"loop_wait"`
-	RetryTimeout         int                   `yaml:"retry_timeout" json:"retry_timeout"`
-	MaximumLagOnFailover int                   `yaml:"maximum_lag_on_failover" json:"maximum_lag_on_failover"`
-	MasterStartTimeout   int                   `yaml:"master_start_timeout" json:"master_start_timeout"`
-	SynchronousMode      bool                  `yaml:"synchronous_mode" json:"synchronous_mode"`
-	StandbyCluster       *StandbyClusterConfig `yaml:"standby_cluster" json:"standby_cluster"`
-	DcsPostgresql        *DcsPostgresqlConfig  `yaml:"postgresql" json:"postgresql"`
-}
-
 func DefaultDcsConfig() *DcsConfig {
 	return &DcsConfig{
 		TTL:                  30,
@@ -187,7 +228,10 @@ func DefaultDcsConfig() *DcsConfig {
 		MaximumLagOnFailover: 1048576,
 		MasterStartTimeout:   300,
 		StandbyCluster:       DefaultStandbyClusterConfig(),
-		DcsPostgresql:        DefaultDcsPostgresqlConfig(),
+		UsePGRewind:          true,
+		UseSlots:             true,
+		Parameters:           map[string]string{},
+		RecoveryConf:         DefaultRecoveryConfConfig(),
 	}
 }
 
@@ -203,27 +247,46 @@ func DefaultInitDBConfig() *InitDBConfig {
 	}
 }
 
-type BootstrapUsersConfig struct {
+type BootstrapPostgresqlUsersConfig struct {
 	Username string
 	Password string
 	Options  []string
 }
 
-type BootstrapConfig struct {
-	DcsConf  *DcsConfig             `yaml:"dcs" json:"dcs"`
-	InitDB   *InitDBConfig          `yaml:"initdb" json:"initdb"`
-	PgHba    []string               `yaml:"pg_hba" json:"pg_hba"`
-	PostInit string                 `yaml:"post_init" json:"post_init"`
-	Users    []BootstrapUsersConfig `yaml:"users" json:"users"`
+type BootstrapPostgresqlConfig struct {
+	DcsConf  *DcsConfig                       `yaml:"dcs" json:"dcs"`
+	InitDB   *InitDBConfig                    `yaml:"initdb" json:"initdb"`
+	PgHba    []string                         `yaml:"pg_hba" json:"pg_hba"`
+	PostInit string                           `yaml:"post_init" json:"post_init"`
+	Users    []BootstrapPostgresqlUsersConfig `yaml:"users" json:"users"`
 }
 
-func DefaultBootstrapConfig() *BootstrapConfig {
-	return &BootstrapConfig{
+func DefaultBootstrapPostgresqlConfig() *BootstrapPostgresqlConfig {
+	return &BootstrapPostgresqlConfig{
 		DcsConf:  DefaultDcsConfig(),
 		InitDB:   DefaultInitDBConfig(),
 		PgHba:    []string{},
 		PostInit: "",
-		Users:    []BootstrapUsersConfig{},
+		Users:    []BootstrapPostgresqlUsersConfig{},
+	}
+}
+
+type BootstrapMysqlConfig struct {
+}
+
+func DefaultBootstrapMysqlConfig() *BootstrapMysqlConfig {
+	return &BootstrapMysqlConfig{}
+}
+
+type BootstrapConfig struct {
+	BootstrapPostgresql *BootstrapPostgresqlConfig `yaml:"postgresql" json:"postgresql"`
+	BootstrapMysql      *BootstrapMysqlConfig      `yaml:"mysql" json:"mysql"`
+}
+
+func DefaultBootstrapConfig() *BootstrapConfig {
+	return &BootstrapConfig{
+		BootstrapPostgresql: DefaultBootstrapPostgresqlConfig(),
+		BootstrapMysql:      DefaultBootstrapMysqlConfig(),
 	}
 }
 
@@ -269,6 +332,7 @@ func DefaultPGAuthConfig() *PGAuthConfig {
 }
 
 type PostgresqlConfig struct {
+	Version        string            `yaml:"version" json:"version"`
 	Listen         string            `yaml:"listen" json:"listen"`
 	ConnectAddress string            `yaml:"connect_address" json:"connect_address"`
 	DataDir        string            `yaml:"data_dir" json:"data_dir"`
@@ -283,6 +347,7 @@ type PostgresqlConfig struct {
 
 func DefaultPostgresqlConfig() *PostgresqlConfig {
 	return &PostgresqlConfig{
+		Version:        "postgresql14",
 		Listen:         "127.0.0.1:5432",
 		ConnectAddress: "127.0.0.1:5432",
 		DataDir:        "",
@@ -293,6 +358,147 @@ func DefaultPostgresqlConfig() *PostgresqlConfig {
 		Krbsrvname:     "postgres",
 		Parameters:     map[string]string{},
 		PrePromote:     "",
+	}
+}
+
+type BackupConfig struct {
+	// MUST: set in init
+	SSHHost                 string `yaml:"ssh-host" json:"ssh-host"`
+	SSHUser                 string `yaml:"ssh-user" json:"ssh-user"`
+	SSHPasswd               string `yaml:"ssh-passwd" json:"ssh-passwd"`
+	SSHPort                 int    `yaml:"ssh-port" json:"ssh-port"`
+	BackupDir               string `yaml:"backupdir" json:"backupdir"`
+	XtrabackupBinDir        string `yaml:"xtrabackup-bindir" json:"xtrabackup-bindir"`
+	BackupIOPSLimits        int    `yaml:"backup-iops-limits" json:"backup-iops-limits"`
+	UseMemory               string `yaml:"backup-use-memory" json:"backup-use-memory"`
+	Parallel                int    `yaml:"backup-parallel" json:"backup-parallel"`
+	MysqldMonitorInterval   int    `yaml:"mysqld-monitor-interval" json:"mysqld-monitor-interval"`
+	MaxAllowedLocalTrxCount int    `yaml:"max-allowed-local-trx-count" json:"max-allowed-local-trx-count"`
+
+	// mysql admin
+	Admin string
+
+	// mysql passed
+	Passwd string
+
+	// mysql host
+	Host string
+
+	// mysql port
+	Port int
+
+	// mysql basedir
+	Basedir string
+
+	// mysql default file
+	DefaultsFile string
+}
+
+func DefaultBackupConfig() *BackupConfig {
+	return &BackupConfig{
+		SSHPort:                 22,
+		BackupDir:               "/u01/backup",
+		XtrabackupBinDir:        ".",
+		BackupIOPSLimits:        100000,
+		UseMemory:               "2GB",
+		Parallel:                2,
+		MysqldMonitorInterval:   1000 * 1,
+		MaxAllowedLocalTrxCount: 0,
+		Admin:                   "root",
+		Passwd:                  "",
+		Host:                    "localhost",
+		Port:                    3306,
+		Basedir:                 "/u01/mysql_20160606/",
+		DefaultsFile:            "/etc/my3306.cnf",
+	}
+}
+
+type MysqlConfig struct {
+	// mysql admin user
+	Admin string `yaml:"admin" json:"admin"`
+
+	// mysql admin passwd
+	Passwd string `yaml:"passwd" json:"passwd"`
+
+	// mysql localhost
+	Host string `yaml:"host" json:"host"`
+
+	// mysql local port
+	Port int `yaml:"port" json:"port"`
+
+	// mysql basedir
+	Basedir string `yaml:"basedir" json:"basedir"`
+
+	// mysql version
+	Version string `yaml:"version" json:"version"`
+
+	// mysql default file path
+	DefaultsFile string `yaml:"defaults-file" json:"defaults-file"`
+
+	// ping mysql interval(ms)
+	PingTimeout int `yaml:"ping-timeout" json:"ping-timeout"`
+
+	// admit defeat count for ping mysql
+	AdmitDefeatPingCnt int `yaml:"admit-defeat-ping-count" json:"admit-defeat-ping-count"`
+
+	// rpl_semi_sync_master_timeout for 2 nodes
+	SemiSyncTimeoutForTwoNodes uint64 `yaml""semi-sync-timeout-for-two-nodes"" json:"semi-sync-timeout-for-two-nodes"`
+
+	// master system variables configure(separated by ;)
+	MasterSysVars string `yaml:"master-sysvars" json:"master-sysvars"`
+
+	// slave system variables configure(separated by ;)
+	SlaveSysVars string `yaml:"slave-sysvars" json:"slave-sysvars"`
+
+	// If true, the mysql monitor will disabled, default is false.
+	MonitorDisabled bool `yaml:"monitor-disabled" json:"monitor-disabled"`
+
+	// mysql intranet ip, other replicas Master_Host
+	ReplHost string
+
+	// mysql replication user
+	ReplUser string
+
+	// mysql replication user pwd
+	ReplPasswd string
+
+	// replication Gtid Purged
+	ReplGtidPurged string
+
+	Backup *BackupConfig // TODO: 重构整个 MysqlConfig 结构，将这些项目分层
+}
+
+func DefaultMysqlConfig() *MysqlConfig {
+	return &MysqlConfig{
+		Admin:                      "root",
+		Passwd:                     "",
+		Host:                       "localhost",
+		Port:                       3306,
+		Version:                    "mysql57",
+		PingTimeout:                1000,
+		AdmitDefeatPingCnt:         2,
+		SemiSyncTimeoutForTwoNodes: 10000,
+		Basedir:                    "/u01/mysql_20160606/",
+		DefaultsFile:               "/etc/my3306.cnf",
+		ReplHost:                   "127.0.0.1",
+		ReplUser:                   "repl",
+		ReplPasswd:                 "repl",
+		ReplGtidPurged:             "",
+		Backup:                     DefaultBackupConfig(),
+	}
+}
+
+type DatabaseConfig struct {
+	Type       string            `yaml:"type" json:"type"`
+	Postgresql *PostgresqlConfig `yaml:"postgresql" json:"postgresql"`
+	Mysql      *MysqlConfig      `yaml:"mysql" json:"mysql"`
+}
+
+func DefaultDatabaseConfig() *DatabaseConfig {
+	return &DatabaseConfig{
+		Type:       "mysql",
+		Postgresql: DefaultPostgresqlConfig(),
+		Mysql:      DefaultMysqlConfig(),
 	}
 }
 
@@ -337,54 +543,60 @@ func DefaultLogConfig() *LogConfig {
 }
 
 type Config struct {
-	Scope      string            `yaml:"scope" json:"scope"`
-	NameSpace  string            `yaml:"namespace" json:"namespace"`
-	Name       string            `yaml:"name" json:"name"`
-	RestAPI    *RestAPIConfig    `yaml:"restapi" json:"restapi"`
-	Ctl        *CtlConfig        `yaml:"ctl" json:"ctl"`
-	Etcd       *EtcdConfig       `yaml:"etcd" json:"etcd"`
-	Raft       *RaftConfig       `yaml:"raft" json:"raft"`
-	Bootstrap  *BootstrapConfig  `yaml:"bootstrap" json:"bootstrap"`
-	Postgresql *PostgresqlConfig `yaml:"postgresql" json:"postgresql"`
-	Watchdog   *WatchdogConfig   `yaml:"watchdog" json:"watchdog"`
-	Tags       *TagsConfig       `yaml:"tags" json:"tags"`
-	Log        *LogConfig        `yaml:"log" json:"log"`
+	Scope     string `yaml:"scope" json:"scope"`
+	NameSpace string `yaml:"namespace" json:"namespace"`
+	Name      string `yaml:"name" json:"name"`
+
+	// connection string(format ip:port)
+	Endpoint string `yaml:"endpoint" json:"endpoint"`
+
+	// HTTP APIs address.
+	PeerAddress string `yaml:"peer-address,omitempty" json:"peer-address,omitempty"`
+
+	RestAPI   *RestAPIConfig   `yaml:"restapi" json:"restapi"`
+	Ctl       *CtlConfig       `yaml:"ctl" json:"ctl"`
+	Election  *ElectionConfig  `yaml:"election" json:"election"`
+	Bootstrap *BootstrapConfig `yaml:"bootstrap" json:"bootstrap"`
+	Database  *DatabaseConfig  `yaml:"database" json:"database"`
+	Watchdog  *WatchdogConfig  `yaml:"watchdog" json:"watchdog"`
+	Tags      *TagsConfig      `yaml:"tags" json:"tags"`
+	Log       *LogConfig       `yaml:"log" json:"log"`
 }
 
 func DefaultConfig() *Config {
 	return &Config{
-		Scope:      "database",
-		NameSpace:  "/service/",
-		Name:       "db1",
-		RestAPI:    DefaultRestAPIConfig(),
-		Ctl:        DefaultCtlConfig(),
-		Etcd:       DefaultEtcdConfig(),
-		Raft:       DefaultRaftConfig(),
-		Bootstrap:  DefaultBootstrapConfig(),
-		Postgresql: DefaultPostgresqlConfig(),
-		Watchdog:   DefaultWatchdogConfig(),
-		Tags:       DefaultTagsConfig(),
-		Log:        DefaultLogConfig(),
+		Scope:     "database",
+		NameSpace: "/service/",
+		Name:      "db1",
+		RestAPI:   DefaultRestAPIConfig(),
+		Ctl:       DefaultCtlConfig(),
+		Election:  DefaultElectionConfig(),
+		Bootstrap: DefaultBootstrapConfig(),
+		Database:  DefaultDatabaseConfig(),
+		Watchdog:  DefaultWatchdogConfig(),
+		Tags:      DefaultTagsConfig(),
+		Log:       DefaultLogConfig(),
 	}
 }
 
 func LoadConfig(filepath string) (*Config, error) {
-	data, err := ioutil.ReadFile(filepath)
+	data, err := os.ReadFile(filepath)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
 	conf := DefaultConfig()
+	//var conf *Config
 	fileType := common.GetFileType(filepath)
 	switch fileType {
 	case common.JsonType:
-		err = json.Unmarshal([]byte(data), conf)
-	case common.YamlType:
-	case common.YmlType:
-		err = yaml.Unmarshal([]byte(data), conf)
+		err = json.Unmarshal(data, &conf)
+	case common.YamlType, common.YmlType:
+		err = yaml.Unmarshal(data, &conf)
 	default:
 		return nil, errors.Errorf("the type [%s] of file [%s] is not supported", fileType, filepath)
 	}
 	if err != nil {
+		fmt.Println("parser file failed：", err)
 		return nil, errors.WithStack(err)
 	}
 	// If there are other non-template parameters, set them here
@@ -399,14 +611,13 @@ func WriteConfig(filepath string, conf *Config) error {
 	switch fileType {
 	case common.JsonType:
 		data, err = json.MarshalIndent(conf, "", "\t")
-	case common.YamlType:
-	case common.YmlType:
+	case common.YamlType, common.YmlType:
 		data, err = yaml.Marshal(conf)
 	default:
 		return errors.Errorf("the type [%s] of file [%s] is not supported", fileType, filepath)
 	}
 
-	if err = ioutil.WriteFile(filepath, data, 0644); err != nil {
+	if err = os.WriteFile(filepath, data, 0644); err != nil {
 		return errors.WithStack(err)
 	}
 	return nil

@@ -1,5 +1,5 @@
 /*
- * Copyright 2022 The NeoHA Authors.
+ * Copyright 2022-2025 The NeoHA Authors.
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -17,8 +17,9 @@ package main
 
 import (
 	"fmt"
-	"neoha/cmd/neohactl"
 	"os"
+
+	"neoha/cmd/neohactl"
 
 	"github.com/spf13/cobra"
 )
