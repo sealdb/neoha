@@ -1,7 +1,8 @@
 bin/*
-pkg/*
 testdir
 coverage*
 *.outs
 tags
 .vscode
+.idea
+*.bak

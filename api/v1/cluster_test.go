@@ -1,5 +1,8 @@
 /*
- * Copyright 2022-2025 The NeoHA Authors.
+ * Copyright 2022-2026 The NeoHA Authors.
+ *
+ * See the AUTHORS file for a list of contributors.
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -17,20 +20,21 @@ package v1
 
 import (
 	"encoding/base64"
+	"github.com/sealdb/neoha/internal/base/model"
 	"testing"
 
-	"neoha/base/common"
-	"neoha/base/nlog"
-	"neoha/server"
+	"github.com/sealdb/neoha/internal/base/common"
+	"github.com/sealdb/neoha/internal/base/nlog"
+	"github.com/sealdb/neoha/internal/server"
 
 	"github.com/ant0ine/go-json-rest/rest"
 	"github.com/ant0ine/go-json-rest/rest/test"
 )
 
-func TestCtlV1ClusterAddRemove(t *testing.T) {
+func testCtlV1ClusterAddRemove(t *testing.T, replMode model.MysqlReplMode) {
 	log := nlog.NewStdLog(nlog.Level(nlog.PANIC))
 	port := common.RandomPort(8000, 9000)
-	servers, cleanup := server.MockServers(log, port, 1)
+	servers, cleanup := server.MockServers(log, port, 1, replMode)
 	defer cleanup()
 
 	neoha := servers[0]
@@ -112,4 +116,12 @@ func TestCtlV1ClusterAddRemove(t *testing.T) {
 		recorded := test.RunRequest(t, handler, req)
 		recorded.CodeIs(200)
 	}
+}
+
+func TestCtlV1ClusterAddRemove_MySQL_SemiSync(t *testing.T) {
+	testCtlV1ClusterAddRemove(t, model.ReplModeSemiSync)
+}
+
+func TestCtlV1ClusterAddRemove_MySQL_MGR(t *testing.T) {
+	testCtlV1ClusterAddRemove(t, model.ReplModeMGR)
 }

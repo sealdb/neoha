@@ -1,5 +1,8 @@
 /*
- * Copyright 2022-2025 The NeoHA Authors.
+ * Copyright 2022-2026 The NeoHA Authors.
+ *
+ * See the AUTHORS file for a list of contributors.
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -18,23 +21,23 @@ package v1
 import (
 	"net/http"
 
-	"neoha/base/model"
-	"neoha/base/nlog"
-	"neoha/cmd/neorpc"
-	"neoha/server"
+	"github.com/sealdb/neoha/internal/base/model"
+	"github.com/sealdb/neoha/internal/base/nlog"
+	"github.com/sealdb/neoha/internal/neorpc"
+	"github.com/sealdb/neoha/internal/server"
 
 	"github.com/ant0ine/go-json-rest/rest"
 )
 
 // RaftStatusHandler impl.
-func XenonPingHandler(log *nlog.Log, neoha *server.Server) rest.HandlerFunc {
+func NeoHAPingHandler(log *nlog.Log, neoha *server.Server) rest.HandlerFunc {
 	f := func(w rest.ResponseWriter, r *rest.Request) {
-		xenonPingHandler(log, neoha, w, r)
+		neohaPingHandler(log, neoha, w, r)
 	}
 	return f
 }
 
-func xenonPingHandler(log *nlog.Log, neoha *server.Server, w rest.ResponseWriter, r *rest.Request) {
+func neohaPingHandler(log *nlog.Log, neoha *server.Server, w rest.ResponseWriter, r *rest.Request) {
 	address := neoha.Address()
 	rsp, err := neorpc.ServerPingRPC(address)
 	if err != nil {

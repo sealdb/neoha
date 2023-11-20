@@ -1,0 +1,41 @@
+# NeoHA + MySQL 8.0 MGR — node 1 (bootstrap primary candidate)
+# Adjust ports, paths, and peer-address for your environment.
+scope: neoha
+namespace: /service/
+name: mgr-node1
+endpoint: 127.0.0.1:18081
+peer-address: 127.0.0.1:18081
+election:
+    algorithm: raft
+    raft:
+        meta-datadir: /tmp/neoha-it/mgr/node1/meta
+        heartbeat-timeout: 1000
+        admit-defeat-hearbeat-count: 10
+        election-timeout: 3000
+        purge-binlog-interval: 300000
+        super-idle: false
+        leader-start-command: nop
+        leader-stop-command: nop
+        purge-binlog-disabled: true
+        requesttimeout: 1000
+        candidate-wait-for-2nodes: 60000
+database:
+    type: mysql
+    mysql:
+        admin: root
+        passwd: ""
+        host: 127.0.0.1
+        port: 13306
+        basedir: /home/wslu/work/mysql/mysql80-debug
+        version: mysql80
+        defaults-file: /tmp/neoha-it/mgr/node1/my.cnf
+        replication-mode: group-replication
+        ping-timeout: 1000
+        admit-defeat-ping-count: 2
+        master-sysvars: "group_replication_group_name='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'"
+        slave-sysvars: "group_replication_group_name='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';group_replication_local_address='127.0.0.1:13361';group_replication_group_seeds='127.0.0.1:13361,127.0.0.1:13362,127.0.0.1:13363'"
+        repl-host: 127.0.0.1
+        repl-user: repl
+        repl-passwd: repl
+log:
+    level: INFO

@@ -1,0 +1,182 @@
+/*
+ * Copyright 2022-2026 The NeoHA Authors.
+ *
+ * See the AUTHORS file for a list of contributors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+*/
+
+package raft
+
+import (
+	"github.com/sealdb/neoha/internal/base/model"
+	"github.com/sealdb/neoha/internal/base/nrpc"
+)
+
+// Peer tuple.
+type Peer struct {
+	raft             *Raft
+	requestTimeout   int // peer client request timneout
+	heartbeatTimeout int
+	connectionStr    string // peer connection string
+}
+
+// NewPeer creates new Peer.
+func NewPeer(raft *Raft, connectionStr string, requestTimeout int, heartbeatTimeout int) *Peer {
+	return &Peer{
+		raft:             raft,
+		connectionStr:    connectionStr,
+		requestTimeout:   requestTimeout,
+		heartbeatTimeout: heartbeatTimeout,
+	}
+}
+
+// sendHeartbeat
+// send heartbeat rpc request
+func (p *Peer) sendHeartbeat(c chan *model.RaftRPCResponse) {
+	// response
+	rsp := model.NewRaftRPCResponse(model.OK)
+
+	// request body
+	req := model.NewRaftRPCRequest()
+	req.Raft.EpochID = p.raft.getEpochID()
+	req.Raft.ViewID = p.raft.getViewID()
+	req.Raft.From = p.raft.getID()
+	req.Raft.To = p.getID()
+	req.Raft.Leader = p.raft.getLeader()
+	req.Peers = p.raft.getPeers()
+	req.IdlePeers = p.raft.getIdlePeers()
+	req.GTID = p.raft.getGTID()
+	req.Repl = p.raft.mysql.GetRepl()
+	req.Raft.CmtState = p.raft.getCmtState().String()
+
+	client, cleanup, err := p.NewClient()
+	if err != nil {
+		p.raft.ERROR("send.heartbeat.to.peer[%v].new.client.error[%v]", p.getID(), err)
+		rsp.RetCode = model.ErrorRPCCall
+		c <- rsp
+		return
+	}
+	defer cleanup()
+
+	method := model.RPCRaftHeartbeat
+	err = client.CallTimeout(p.requestTimeout*2, method, req, rsp)
+	if err != nil {
+		p.raft.ERROR("send.heartbeat.to.peer[%v].client.call.error[%v]", p.getID(), err)
+		rsp.RetCode = model.ErrorRPCCall
+		c <- rsp
+		return
+	}
+	p.raft.DEBUG("send.heartbeat.to.peer[%v].client.call.ok.rsp[%v].my.gtid.is[%v]", p.getID(), rsp, req.GTID)
+	c <- rsp
+}
+
+// sendRequestVote
+// send vote rpc request
+func (p *Peer) sendRequestVote(c chan *model.RaftRPCResponse) {
+	var err error
+
+	// response
+	rsp := model.NewRaftRPCResponse(model.OK)
+
+	// request body
+	req := model.NewRaftRPCRequest()
+	req.Raft.EpochID = p.raft.meta.EpochID
+	req.Raft.ViewID = p.raft.meta.ViewID
+	req.Raft.From = p.raft.getID()
+	req.Raft.To = p.connectionStr
+	req.Raft.Leader = p.raft.getLeader()
+	req.Raft.UUID, err = p.raft.getUUID()
+	if err != nil {
+		p.raft.ERROR("send.requestvote.to.peer[%v].get.uuid.error[%v]", p.getID(), err)
+		rsp.RetCode = model.ErrorMySQLDown
+		c <- rsp
+		return
+	}
+	req.GTID, err = p.raft.mysql.GetGTID()
+	if err != nil {
+		p.raft.ERROR("send.requestvote.to.peer[%v].get.gtid.error[%v]", p.getID(), err)
+		rsp.RetCode = model.ErrorMySQLDown
+		c <- rsp
+		return
+	}
+	p.raft.WARNING("send.requestvote.to.peer[%v].request.gtid[%v]", p.getID(), req.GTID)
+
+	client, cleanup, err := p.NewClient()
+	if err != nil {
+		p.raft.ERROR("send.requestvote.to.peer[%v].new.client.error[%v]", p.getID(), err)
+		rsp.RetCode = model.ErrorRPCCall
+		c <- rsp
+		return
+	}
+	defer cleanup()
+
+	method := model.RPCRaftRequestVote
+	err = client.CallTimeout(p.requestTimeout, method, req, rsp)
+	if err != nil {
+		p.raft.ERROR("send.requestvote.to.peer[%v].client.call.error[%v]", p.getID(), err)
+		rsp.RetCode = model.ErrorRPCCall
+		c <- rsp
+		return
+	}
+	c <- rsp
+}
+
+// follower SendPing
+func (p *Peer) SendPing(c chan *model.RaftRPCResponse) {
+	// response
+	rsp := model.NewRaftRPCResponse(model.OK)
+
+	// request body
+	req := model.NewRaftRPCRequest()
+
+	client, cleanup, err := p.NewClient()
+	if err != nil {
+		p.raft.ERROR("send.ping.to.peer[%v].new.client.error[%v]", p.getID(), err)
+		rsp.RetCode = model.ErrorRPCCall
+		c <- rsp
+		return
+	}
+	defer cleanup()
+
+	method := model.RPCRaftPing
+	err = client.CallTimeout(p.requestTimeout, method, req, rsp)
+	if err != nil {
+		p.raft.ERROR("send.ping.to.peer[%v].client.call.error[%v]", p.getID(), err)
+		rsp.RetCode = model.ErrorRPCCall
+		c <- rsp
+		return
+	}
+	p.raft.DEBUG("send.ping.to.peer[%v].client.call.ok.rsp[%v]", p.getID(), rsp)
+	c <- rsp
+}
+
+// NewClient creates new client.
+func (p *Peer) NewClient() (*nrpc.Client, func(), error) {
+	client, err := nrpc.NewClient(p.connectionStr, p.requestTimeout)
+	if err != nil {
+		return nil, nil, err
+	}
+	return client, func() {
+		client.Close()
+	}, nil
+}
+
+// attributes
+func (p *Peer) freePeer() {
+	// nop
+}
+
+func (p *Peer) getID() string {
+	return p.connectionStr
+}

@@ -1,4 +1,6 @@
-# Copyright 2022 The NeoHA Authors.
+# Copyright 2022-2026 The NeoHA Authors.
+#
+# See the AUTHORS file for a list of contributors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,15 +21,15 @@ export LDFLAGS :=
 COVERAGE_OUT := coverage.out
 COVERAGE_LOG := coverage.log
 
-.PHONY:build
+.PHONY: build clean install fmt test testbase testconfig testdatabase testmanager testelection testserver testcmd test-integration vet coverage
 
 build: LDFLAGS   += $(shell GOPATH=${GOPATH} build/ldflags.sh)
 build:
 	@echo "--> Building..."
 	@mkdir -p bin/
 	go mod tidy
-	go build -v -o bin/neoha    -ldflags '$(LDFLAGS)' neoha/main.go
-	go build -v -o bin/neohactl -ldflags '$(LDFLAGS)' cmd/main.go
+	go build -v -o bin/neoha    -ldflags '$(LDFLAGS)' ./cmd/neoha
+	go build -v -o bin/neohactl -ldflags '$(LDFLAGS)' ./cmd/neohactl
 	@chmod 755 bin/*
 
 clean:
@@ -55,39 +57,47 @@ test:
 	@$(MAKE) testcmd
 
 testbase:
-	go test -v neoha/base/common
-	go test -v neoha/base/nlog
-	go test -v neoha/base/nrpc
+	go test -v ./internal/base/common/...
+	go test -v ./internal/base/nlog/...
+	go test -v ./internal/base/nrpc/...
 testconfig:
-	go test -v neoha/config
+	go test -v ./internal/config/...
 testdatabase:
-	go test -v neoha/database/mysql
-	# go test -v neoha/database/postgresql
+	go test -v ./internal/database/mysql/...
+	# go test -v ./internal/database/postgresql/...
 testmanager:
-	go test -v neoha/manager/mysqld
-	# gp test -v neoha/manager/postmaster
+	go test -v ./internal/manager/mysqld/...
+	# go test -v ./internal/manager/postmaster/...
 testelection:
-	go test -v neoha/election/raft
-	# go test -v neoha/election/etcd
+	go test -v ./internal/election/raft/...
+	# go test -v ./internal/election/etcd/...
 testserver:
-	go test -v neoha/server
+	go test -v ./internal/server/...
 testcmd:
-	go test -v neoha/cmd/neohactl
-	go test -v neoha/api/v1
+	go test -v ./internal/neohactl/...
+	go test -v ./api/v1/...
 
-PKGS = 	base/common \
-		base/nlog \
-		base/nrpc \
-		config \
-		database/mysql \
-		manager/mysqld \
-		election/raft \
-		server \
-		cmd/neohactl \
-		api/v1
-		#database/postgresql \
-		#manager/postmaster \
-		#election/etcd \
+test-integration:
+	@echo "--> Integration testing..."
+	@mkdir -p bin
+	@echo "--> Pre-building test binary (avoids silent compile)..."
+	go test -tags=integration -c -o bin/neoha-it.test ./test/integration
+	NEOHA_IT_MYSQL_BASE=$${NEOHA_IT_MYSQL_BASE:-/home/wslu/work/mysql/mysql80-debug} \
+		bin/neoha-it.test -test.v -test.timeout=10m -test.count=1
+
+PKGS =	./internal/base/common/... \
+	./internal/base/nlog/... \
+	./internal/base/nrpc/... \
+	./internal/config/... \
+	./internal/database/mysql/... \
+	./internal/manager/mysqld/... \
+	./internal/election/raft/... \
+	./internal/server/... \
+	./internal/neohactl/... \
+	./api/v1/...
+		#./internal/database/postgresql/... \
+		#./internal/manager/postmaster/... \
+		#./internal/election/etcd/... \
 
 vet:
 	go vet $(PKGS)

@@ -1,6 +1,8 @@
 #!/usr/bin/env sh
 
-# Copyright 2022 The NeoHA Authors.
+# Copyright 2022-2026 The NeoHA Authors.
+#
+# See the AUTHORS file for a list of contributors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,6 +20,6 @@ set -eu
 
 cd "$(dirname "${0}")/.."
 
-echo '-X "neoha/build.tag='$(git describe --tags --always)'"' \
-     '-X "neoha/build.time='$(date -u '+%Y/%m/%d %H:%M:%S')'"' \
-     '-X "neoha/build.git='$(git rev-parse --short HEAD)'"'
+echo '-X "github.com/sealdb/neoha/build.tag='$(git describe --tags --always)'"' \
+     '-X "github.com/sealdb/neoha/build.time='$(date -u '+%Y/%m/%d %H:%M:%S')'"' \
+     '-X "github.com/sealdb/neoha/build.git='$(git rev-parse --short HEAD)'"'

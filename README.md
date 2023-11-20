@@ -8,6 +8,12 @@
 
 NeoHA is a template for MySQL and PostgreSQL High Availability with Etcd, Consul, ZooKeeper, or Kubernetes written in Golang, inspired by [zalando/patroni](https://github.com/zalando/patroni) and [radondb/xenon](https://github.com/radondb/xenon).
 
+## Authors
+
+Copyright 2022-2026 [The NeoHA Authors](AUTHORS). See [AUTHORS](AUTHORS) for contributor details.
+
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
+
 # Unit Tests
 
 depend:
@@ -49,6 +55,7 @@ mysql> show processlist;
   - 借鉴xenoncli，不同在于要添加前缀指令，比如 neohacli mysql cluster gtid
 - [ ] ctl
   - 借鉴 xenon ctl，也要添加前缀
+- [ ] 重构测试代码，即将重复代码封装成函数，放在 *_test.go或mock.go文件中
 - [ ] 支持 PostgreSQL
 - [ ] 支持其他选举工具
   - [ ] 支持 etcd

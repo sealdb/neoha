@@ -1,5 +1,8 @@
 /*
- * Copyright 2022-2025 The NeoHA Authors.
+ * Copyright 2022-2026 The NeoHA Authors.
+ *
+ * See the AUTHORS file for a list of contributors.
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -16,7 +19,7 @@
 package api
 
 import (
-	"neoha/api/v1"
+	"github.com/sealdb/neoha/api/v1"
 
 	"github.com/ant0ine/go-json-rest/rest"
 )
@@ -38,6 +41,6 @@ func (admin *Admin) NewRouter() (rest.App, error) {
 		rest.Put("/v1/raft/disable", v1.RaftDisableHandler(log, neoha)),
 
 		// neoha.
-		rest.Get("/v1/neoha/ping", v1.XenonPingHandler(log, neoha)),
+		rest.Get("/v1/neoha/ping", v1.NeoHAPingHandler(log, neoha)),
 	)
 }

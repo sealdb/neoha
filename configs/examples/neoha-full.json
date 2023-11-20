@@ -1,0 +1,160 @@
+{
+	"scope": "neoha",
+	"namespace": "/service/",
+	"name": "db1",
+	"endpoint": "127.0.0.1:8080",
+	"peer-address": ":6060",
+	"restapi": {
+		"enable-apis": false,
+		"listen": "127.0.0.1:8008",
+		"connect_address": "127.0.0.1:8008",
+		"certfile": "",
+		"keyfile": "",
+		"authentication": {
+			"username": "",
+			"password": ""
+		}
+	},
+	"ctl": {
+		"insecure": false,
+		"certfile": "",
+		"cacert": ""
+	},
+	"election": {
+		"algorithm": "raft",
+		"raft": {
+			"meta-datadir": ".",
+			"heartbeat-timeout": 1000,
+			"admit-defeat-hearbeat-count": 10,
+			"election-timeout": 3000,
+			"purge-binlog-interval": 300000,
+			"super-idle": false,
+			"leader-start-command": "nop",
+			"leader-stop-command": "nop",
+			"purge-binlog-disabled": false,
+			"requesttimeout": 1000,
+			"candidate-wait-for-2nodes": 60000
+		},
+		"etcd": {
+			"host": "",
+			"hosts": [],
+			"use_proxies": false
+		}
+	},
+	"bootstrap": {
+		"postgresql": {
+			"dcs": {
+				"ttl": 30,
+				"loop_wait": 10,
+				"retry_timeout": 10,
+				"maximum_lag_on_failover": 1048576,
+				"master_start_timeout": 300,
+				"synchronous_mode": false,
+				"standby_cluster": {
+					"host": "",
+					"port": 0,
+					"primary_slot_name": "pgrepl"
+				},
+				"use_pg_rewind": true,
+				"use_slots": true,
+				"parameters": {},
+				"recovery_conf": {
+					"restore_command": ""
+				}
+			},
+			"initdb": {
+				"encoding": "UTF8",
+				"data_checksums": true
+			},
+			"pg_hba": [],
+			"post_init": "",
+			"users": []
+		},
+		"mysql": {}
+	},
+	"database": {
+		"type": "mysql",
+		"postgresql": {
+			"version": "postgresql14",
+			"listen": "127.0.0.1:5432",
+			"connect_address": "127.0.0.1:5432",
+			"data_dir": "",
+			"bin_dir": "",
+			"config_dir": "",
+			"pgpass": "",
+			"authentication": {
+				"replication": {
+					"username": "",
+					"password": ""
+				},
+				"superuser": {
+					"username": "",
+					"password": ""
+				},
+				"rewind": {
+					"username": "",
+					"password": ""
+				}
+			},
+			"krbsrvname": "postgres",
+			"parameters": {},
+			"pre_promote": ""
+		},
+		"mysql": {
+			"admin": "root",
+			"passwd": "",
+			"host": "localhost",
+			"port": 3306,
+			"basedir": "/u01/mysql_20221010/",
+			"version": "mysql57",
+			"defaults-file": "/etc/my3306.cnf",
+			"replication-mode": "semi-sync",
+			"ping-timeout": 1000,
+			"admit-defeat-ping-count": 2,
+			"max-open-conns": 2,
+			"max-idle-conns": 2,
+			"failover-on-too-many-connections": false,
+			"semi-sync-timeout-for-two-nodes": 10000,
+			"master-sysvars": "",
+			"slave-sysvars": "",
+			"monitor-disabled": false,
+			"repl-host": "127.0.0.1",
+			"repl-user": "repl",
+			"repl-passwd": "repl",
+			"repl-gtid-purged": "",
+			"backup": {
+				"ssh-host": "127.0.0.1",
+				"ssh-user": "backup",
+				"ssh-passwd": "backup",
+				"ssh-port": 22,
+				"backupdir": "/u01/backup",
+				"xtrabackup-bindir": ".",
+				"backup-iops-limits": 100000,
+				"backup-use-memory": "2GB",
+				"backup-parallel": 2,
+				"mysqld-monitor-interval": 1000,
+				"max-allowed-local-trx-count": 0,
+				"admin": "root",
+				"passwd": "",
+				"host": "localhost",
+				"port": 3306,
+				"basedir": "/u01/mysql_20221010/",
+				"defaults-file": "/etc/my3306.cnf"
+			}
+		}
+	},
+	"watchdog": {
+		"mode": "automatic",
+		"device": "/dev/watchdog",
+		"safety_margin": 5
+	},
+	"tags": {
+		"nofailover": false,
+		"noloadbalance": false,
+		"clonefrom": false,
+		"nosync": false
+	},
+	"log": {
+		"level": "INFO"
+	}
+}

@@ -1,0 +1,169 @@
+/*
+ * Copyright 2022-2026 The NeoHA Authors.
+ *
+ * See the AUTHORS file for a list of contributors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+*/
+
+package mysql
+
+import (
+	"context"
+	"database/sql"
+
+	"github.com/sealdb/neoha/internal/base/common"
+
+	"github.com/pkg/errors"
+	// driver.
+	_ "github.com/go-sql-driver/mysql"
+)
+
+// Query executes a query that returns rows
+func Query(db *sql.DB, query string, args ...interface{}) ([]map[string]string, error) {
+	var err error
+	var results *sql.Rows
+	var columns []string
+	var rows []map[string]string
+
+	if results, err = db.Query(query, args...); err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	// get the rows
+	if columns, err = results.Columns(); err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	values := make([]interface{}, len(columns))
+	for results.Next() {
+		for i := 0; i < len(columns); i++ {
+			values[i] = new([]byte)
+		}
+		if err = results.Scan(values...); err != nil {
+			return nil, errors.WithStack(err)
+		}
+
+		row := make(map[string]string)
+		for index, columnName := range columns {
+			row[columnName] = string(*values[index].(*[]byte))
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
+}
+
+// QueryWithTimeout used to execute the query with maxTime.
+func QueryWithTimeout(db *sql.DB, maxTime int, query string, args ...interface{}) ([]map[string]string, error) {
+	var err error
+	var rows []map[string]string
+	rsp := make(chan error, 1)
+
+	go func() {
+		rows, err = Query(db, query, args...)
+		rsp <- err
+	}()
+
+	timeout := common.NormalTimeout(maxTime)
+	defer common.NormalTimerRelaese(timeout)
+
+	select {
+	case <-timeout.C:
+		return nil, errors.Errorf("db.query.timeout[%v, %v]", maxTime, query)
+	case err := <-rsp:
+		return rows, err
+	}
+}
+
+// Execute executes a query without returning any rows
+func Execute(db *sql.DB, query string, args ...interface{}) error {
+	var err error
+
+	if _, err = db.Exec(query, args...); err != nil {
+		return errors.WithStack(err)
+	}
+	return nil
+}
+
+// ExecuteWithTimeout executes a query without returning any rows.
+func ExecuteWithTimeout(db *sql.DB, maxTime int, query string, args ...interface{}) error {
+	rsp := make(chan error, 1)
+
+	go func() {
+		_, err := db.Exec(query, args...)
+		rsp <- err
+	}()
+
+	timeout := common.NormalTimeout(maxTime)
+	defer common.NormalTimerRelaese(timeout)
+
+	select {
+	case <-timeout.C:
+		return errors.Errorf("db.Exec.timeout[%v, %v]", maxTime, query)
+
+	case err := <-rsp:
+		return err
+	}
+}
+
+// ExecuteSuperQueryList runs queryList on one session so session variables apply to all statements.
+func ExecuteSuperQueryList(db *sql.DB, queryList []string) error {
+	return ExecuteSuperQueryListWithTimeout(db, 0, queryList)
+}
+
+// ExecuteSuperQueryListWithTimeout runs queryList on one session with optional per-statement timeout.
+func ExecuteSuperQueryListWithTimeout(db *sql.DB, maxTime int, queryList []string) error {
+	if len(queryList) == 0 {
+		return nil
+	}
+	conn, err := db.Conn(context.Background())
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	defer conn.Close()
+
+	for _, query := range queryList {
+		if err := executeConnWithTimeout(conn, maxTime, query); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func executeConnWithTimeout(conn *sql.Conn, maxTime int, query string) error {
+	if maxTime <= 0 {
+		if _, err := conn.ExecContext(context.Background(), query); err != nil {
+			return errors.WithStack(err)
+		}
+		return nil
+	}
+
+	rsp := make(chan error, 1)
+	go func() {
+		_, err := conn.ExecContext(context.Background(), query)
+		rsp <- err
+	}()
+
+	timeout := common.NormalTimeout(maxTime)
+	defer common.NormalTimerRelaese(timeout)
+
+	select {
+	case <-timeout.C:
+		return errors.Errorf("db.Exec.timeout[%v, %v]", maxTime, query)
+	case err := <-rsp:
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		return nil
+	}
+}

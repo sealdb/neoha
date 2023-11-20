@@ -1,4 +1,4 @@
-module neoha
+module github.com/sealdb/neoha
 
 go 1.20
 

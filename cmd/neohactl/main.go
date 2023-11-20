@@ -1,0 +1,58 @@
+/*
+ * Copyright 2022-2026 The NeoHA Authors.
+ *
+ * See the AUTHORS file for a list of contributors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+*/
+
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/sealdb/neoha/internal/neohactl"
+
+	"github.com/spf13/cobra"
+)
+
+const (
+	cliName        = "neohactl"
+	cliDescription = "A simple command line client for neoha"
+)
+
+var (
+	rootCmd = &cobra.Command{
+		Use:        cliName,
+		Short:      cliDescription,
+		SuggestFor: []string{"neohactl"},
+	}
+)
+
+func init() {
+	rootCmd.AddCommand(neohactl.NewVersionCommand())
+	rootCmd.AddCommand(neohactl.NewInitCommand())
+	rootCmd.AddCommand(neohactl.NewClusterCommand())
+	rootCmd.AddCommand(neohactl.NewMysqlCommand())
+	rootCmd.AddCommand(neohactl.NewRaftCommand())
+	rootCmd.AddCommand(neohactl.NewNeoHACommand())
+	rootCmd.AddCommand(neohactl.NewPerfCommand())
+}
+
+func main() {
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Println(err)
+		os.Exit(-1)
+	}
+}

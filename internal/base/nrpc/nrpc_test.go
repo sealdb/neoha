@@ -1,0 +1,210 @@
+/*
+ * Copyright 2022-2026 The NeoHA Authors.
+ *
+ * See the AUTHORS file for a list of contributors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+*/
+
+package nrpc
+
+import (
+	"fmt"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/sealdb/neoha/internal/base/common"
+	"github.com/sealdb/neoha/internal/base/nlog"
+
+	"github.com/stretchr/testify/assert"
+)
+
+type TestServer struct {
+	conn  string
+	rpc   *Service
+	count int
+}
+
+type Request struct {
+	Value int
+}
+
+type Response struct {
+	Value int
+}
+
+func (s *TestServer) Ping(req Request, rsp *Response) error {
+	s.count += req.Value
+	rsp.Value = s.count
+	return nil
+}
+
+func (s *TestServer) PingTimeout(req Request, rsp *Response) error {
+	time.Sleep(time.Second)
+	return nil
+}
+
+func (s *TestServer) start(t *testing.T) {
+	log := nlog.NewStdLog(nlog.Level(nlog.PANIC))
+	nrpc, err := NewService(ConnectionStr(s.conn), Log(log))
+	assert.Nil(t, err)
+
+	err = nrpc.RegisterService(s)
+	assert.Nil(t, err)
+
+	err = nrpc.Start()
+	assert.Nil(t, err)
+
+	s.rpc = nrpc
+}
+
+func (s *TestServer) stop() {
+	s.rpc.Stop()
+}
+
+func TestRpcServer(t *testing.T) {
+	port := common.RandomPort(5000, 5670)
+	conn := fmt.Sprintf("127.0.0.1:%v", port)
+
+	server := &TestServer{conn: conn, count: 1}
+	server.start(t)
+	defer server.stop()
+
+	for i := 0; i < 1000; i++ {
+		err := client_call_ForTest(conn, "TestServer.Ping")
+		assert.Nil(t, err)
+	}
+}
+
+func TestRpcClientError(t *testing.T) {
+	port := common.RandomPort(6000, 6670)
+	conn := fmt.Sprintf("127.0.0.1:%v", port)
+	connerr := "127.0.0.1:8082"
+	method := "TestServer.Ping"
+	methoderr := "Test.Ping"
+
+	server := &TestServer{conn: conn, count: 1}
+	server.start(t)
+	server.stop()
+
+	for i := 0; i < 1000; i++ {
+		{
+			err := client_call_ForTest(connerr, method)
+			want := true
+			got := (err != nil)
+			assert.Equal(t, want, got)
+		}
+
+		{
+			err := client_call_ForTest(conn, methoderr)
+			want := true
+			got := strings.Contains(err.Error(), fmt.Sprintf("dial tcp 127.0.0.1:%d", port))
+			assert.Equal(t, want, got)
+		}
+	}
+}
+
+func TestRpcServerStop(t *testing.T) {
+	port := common.RandomPort(5000, 5670)
+	conn := fmt.Sprintf("127.0.0.1:%v", port)
+	server := &TestServer{conn: conn, count: 1}
+	server.start(t)
+	server.stop()
+
+	client, err := NewClient(conn, 100)
+	{
+		want := true
+		got := strings.Contains(err.Error(), fmt.Sprintf("dial tcp 127.0.0.1:%d", port))
+		assert.Equal(t, want, got)
+	}
+
+	{
+		want := true
+		got := (client == nil)
+		assert.Equal(t, want, got)
+	}
+}
+
+func TestRpcClientNil(t *testing.T) {
+	port := common.RandomPort(6000, 6670)
+	conn := fmt.Sprintf("127.0.0.1:%v", port)
+	method := "TestServer.Ping"
+
+	server := &TestServer{conn: conn, count: 1}
+	server.start(t)
+
+	client, err := NewClient(conn, 100)
+	assert.Nil(t, err)
+	client.Close()
+
+	req := Request{Value: 1}
+	rsp := Response{}
+	err = client.Call(method, req, &rsp)
+	want := "nrpc.client.is.closed"
+	got := err.Error()
+	assert.Equal(t, want, got)
+	server.stop()
+}
+
+func TestRpcCallTimeout(t *testing.T) {
+	var rsp Response
+	port := common.RandomPort(6000, 6670)
+	conn := fmt.Sprintf("127.0.0.1:%v", port)
+	method := "TestServer.PingTimeout"
+
+	server := &TestServer{conn: conn, count: 1}
+	server.start(t)
+
+	client, err := NewClient(conn, 100)
+	assert.Nil(t, err)
+
+	req := Request{Value: 1}
+
+	{
+		timeout := 1100
+		err = client.CallTimeout(timeout, method, req, &rsp)
+		assert.Nil(t, err)
+	}
+
+	{
+		timeout := 1100
+		method = "xx.xx"
+		err = client.CallTimeout(timeout, method, req, &rsp)
+		want := "rpc: can't find service xx.xx"
+		got := err.Error()
+		assert.Equal(t, want, got)
+	}
+
+	{
+		timeout := 500
+		method = "TestServer.PingTimeout"
+		err = client.CallTimeout(timeout, method, req, &rsp)
+		want := fmt.Sprintf("rpc.client.call[TestServer.PingTimeout].timeout[%v]", timeout)
+		got := err.Error()
+		assert.Equal(t, want, got)
+	}
+	server.stop()
+}
+
+func client_call_ForTest(svrConn string, method string) error {
+	var rsp Response
+	client, err := NewClient(svrConn, 100)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
+	req := Request{Value: 1}
+	return client.Call(method, req, &rsp)
+}

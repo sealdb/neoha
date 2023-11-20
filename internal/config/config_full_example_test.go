@@ -1,0 +1,83 @@
+/*
+ * Copyright 2022-2026 The NeoHA Authors.
+ *
+ * See the AUTHORS file for a list of contributors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+*/
+
+package config
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
+
+func fullExampleWant() *Config {
+	want := DefaultConfig()
+	want.Scope = "neoha"
+	return want
+}
+
+func TestLoadFullExampleConfig(t *testing.T) {
+	examples := filepath.Join("..", "..", "configs", "examples")
+	for _, name := range []string{"neoha-full.yaml", "neoha-full.json"} {
+		t.Run(name, func(t *testing.T) {
+			conf, err := LoadConfig(filepath.Join(examples, name))
+			assert.NoError(t, err)
+			assert.Equal(t, fullExampleWant(), conf)
+		})
+	}
+}
+
+func TestFullExampleCoversAllSections(t *testing.T) {
+	conf, err := LoadConfig(filepath.Join("..", "..", "configs", "examples", "neoha-full.yaml"))
+	assert.NoError(t, err)
+
+	assert.NotNil(t, conf.RestAPI)
+	assert.NotNil(t, conf.RestAPI.Authentication)
+	assert.NotNil(t, conf.Ctl)
+	assert.NotNil(t, conf.Election)
+	assert.NotNil(t, conf.Election.Raft)
+	assert.NotNil(t, conf.Election.Etcd)
+	assert.NotNil(t, conf.Bootstrap)
+	assert.NotNil(t, conf.Bootstrap.BootstrapPostgresql)
+	assert.NotNil(t, conf.Bootstrap.BootstrapPostgresql.DcsConf)
+	assert.NotNil(t, conf.Bootstrap.BootstrapPostgresql.DcsConf.StandbyCluster)
+	assert.NotNil(t, conf.Bootstrap.BootstrapPostgresql.DcsConf.RecoveryConf)
+	assert.NotNil(t, conf.Bootstrap.BootstrapPostgresql.InitDB)
+	assert.NotNil(t, conf.Bootstrap.BootstrapMysql)
+	assert.NotNil(t, conf.Database)
+	assert.NotNil(t, conf.Database.Mysql)
+	assert.NotNil(t, conf.Database.Mysql.Backup)
+	assert.NotNil(t, conf.Database.Postgresql)
+	assert.NotNil(t, conf.Database.Postgresql.Auth)
+	assert.NotNil(t, conf.Watchdog)
+	assert.NotNil(t, conf.Tags)
+	assert.NotNil(t, conf.Log)
+}
+
+// TestRegenerateFullExampleJSON refreshes configs/examples/neoha-full.json from YAML.
+// Run: NEOHA_REGEN_CONFIG_EXAMPLES=1 go test ./internal/config/ -run TestRegenerateFullExampleJSON
+func TestRegenerateFullExampleJSON(t *testing.T) {
+	if os.Getenv("NEOHA_REGEN_CONFIG_EXAMPLES") == "" {
+		t.Skip("set NEOHA_REGEN_CONFIG_EXAMPLES=1 to regenerate")
+	}
+	examples := filepath.Join("..", "..", "configs", "examples")
+	conf, err := LoadConfig(filepath.Join(examples, "neoha-full.yaml"))
+	assert.NoError(t, err)
+	assert.NoError(t, WriteConfig(filepath.Join(examples, "neoha-full.json"), conf))
+}

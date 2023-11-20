@@ -1,5 +1,8 @@
 /*
- * Copyright 2022-2025 The NeoHA Authors.
+ * Copyright 2022-2026 The NeoHA Authors.
+ *
+ * See the AUTHORS file for a list of contributors.
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -17,22 +20,23 @@ package v1
 
 import (
 	"encoding/base64"
+	"github.com/sealdb/neoha/internal/base/model"
 	"strings"
 	"testing"
 
-	"neoha/base/common"
-	"neoha/base/nlog"
-	"neoha/server"
+	"github.com/sealdb/neoha/internal/base/common"
+	"github.com/sealdb/neoha/internal/base/nlog"
+	"github.com/sealdb/neoha/internal/server"
 
 	"github.com/ant0ine/go-json-rest/rest"
 	"github.com/ant0ine/go-json-rest/rest/test"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestCtlV1Raft(t *testing.T) {
+func testCtlV1Raft(t *testing.T, replMode model.MysqlReplMode) {
 	log := nlog.NewStdLog(nlog.Level(nlog.PANIC))
 	port := common.RandomPort(8000, 9000)
-	servers, cleanup := server.MockServers(log, port, 1)
+	servers, cleanup := server.MockServers(log, port, 1, replMode)
 	defer cleanup()
 
 	neoha := servers[0]
@@ -114,4 +118,12 @@ func TestCtlV1Raft(t *testing.T) {
 		recorded := test.RunRequest(t, handler, req)
 		recorded.CodeIs(200)
 	}
+}
+
+func TestCtlV1Raft_MySQL_SemiSync(t *testing.T) {
+	testCtlV1Raft(t, model.ReplModeSemiSync)
+}
+
+func TestCtlV1Raft_MySQL_MGR(t *testing.T) {
+	testCtlV1Raft(t, model.ReplModeMGR)
 }
