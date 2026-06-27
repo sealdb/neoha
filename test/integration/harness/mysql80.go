@@ -31,20 +31,17 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 )
 
-const (
-	defaultMySQLBase = "/home/wslu/work/mysql/mysql80-debug"
-)
-
 // MySQL80 implements Backend for a debug/source-tree MySQL 8.0 build.
 type MySQL80 struct {
 	BaseDir  string
 	SemiSync bool // when true, load semi-sync plugins instead of group_replication
+	Plain    bool // when true, minimal mysqld without replication plugins (backup tests)
 }
 
 // NewMySQL80 returns a backend using baseDir (mysqld lives in baseDir/bin/mysqld).
 func NewMySQL80(baseDir string) *MySQL80 {
 	if baseDir == "" {
-		baseDir = defaultMySQLBase
+		baseDir = LoadIntegrationSettings().MySQLBase()
 	}
 	return &MySQL80{BaseDir: baseDir}
 }
@@ -60,7 +57,7 @@ func (b *MySQL80) InitNode(ctx context.Context, node *Node) error {
 		return err
 	}
 	node.DataDir = filepath.Join(node.WorkDir, "data")
-	node.Socket = filepath.Join(node.WorkDir, "mysql.sock")
+	node.Socket = filepath.Join(node.DataDir, "mysql.sock")
 	node.Config = filepath.Join(node.WorkDir, "my.cnf")
 
 	if err := os.MkdirAll(node.DataDir, 0o755); err != nil {
@@ -68,7 +65,23 @@ func (b *MySQL80) InitNode(ctx context.Context, node *Node) error {
 	}
 
 	var cnf string
-	if b.SemiSync {
+	switch {
+	case b.Plain:
+		cnf = fmt.Sprintf(`[mysqld]
+basedir=%s
+datadir=%s
+port=%d
+socket=%s
+pid-file=%s/mysqld.pid
+bind-address=127.0.0.1
+mysqlx=0
+log-bin=mysql-bin
+binlog_format=ROW
+gtid_mode=ON
+enforce_gtid_consistency=ON
+server_id=%d
+`, b.BaseDir, node.DataDir, node.Port, node.Socket, node.DataDir, node.Port)
+	case b.SemiSync:
 		cnf = fmt.Sprintf(`[mysqld]
 basedir=%s
 plugin_dir=%s/lib/plugin
@@ -93,8 +106,8 @@ report_host=127.0.0.1
 report_port=%d
 default_authentication_plugin=mysql_native_password
 plugin_load_add='semisync_master.so;semisync_slave.so'
-`, b.BaseDir, b.BaseDir, node.DataDir, node.Port, node.Socket, node.WorkDir, node.WorkDir, node.Port, node.Port)
-	} else {
+`, b.BaseDir, b.BaseDir, node.DataDir, node.Port, node.Socket, node.DataDir, node.DataDir, node.Port, node.Port)
+	default:
 		cnf = fmt.Sprintf(`[mysqld]
 basedir=%s
 plugin_dir=%s/lib/plugin
@@ -125,7 +138,7 @@ loose-group_replication_bootstrap_group=OFF
 loose-group_replication_single_primary_mode=ON
 loose-group_replication_recovery_get_public_key=ON
 plugin_load_add='group_replication.so'
-`, b.BaseDir, b.BaseDir, node.DataDir, node.Port, node.Socket, node.WorkDir, node.WorkDir, node.Port, node.Port, mgrGroupName, node.GRPort)
+`, b.BaseDir, b.BaseDir, node.DataDir, node.Port, node.Socket, node.DataDir, node.DataDir, node.Port, node.Port, mgrGroupName, node.GRPort)
 	}
 
 	if err := os.WriteFile(node.Config, []byte(cnf), 0o644); err != nil {

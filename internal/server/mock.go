@@ -88,6 +88,17 @@ func MockServers(log *nlog.Log, port int, count int, replMode model.MysqlReplMod
 	}
 }
 
+// MockPrepareTryToLeader refreshes the mysql mock and ping state on a server before
+// neohactl raft trytoleader (former leader may be MYSQL_DEAD after MGR leader loop).
+func MockPrepareTryToLeader(s *Server, replMode model.MysqlReplMode) {
+	if replMode == model.ReplModeMGR {
+		s.db.GetMysql().SetMysqlHandler(mysql.NewMockGTIDX3MGRCaughtUp())
+	} else {
+		s.db.GetMysql().SetMysqlHandler(mysql.NewMockGTIDA(replMode))
+	}
+	s.db.GetMysql().Ping()
+}
+
 // wait the leader eggs when leadernums >0
 // if leadernums == 0, we just want to sleep for a heartbeat broadcast
 func MockWaitServerLeaderEggs(servers []*Server, leadernums int, replMode model.MysqlReplMode) {

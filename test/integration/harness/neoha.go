@@ -47,7 +47,29 @@ const (
 	mgrReplUser  = "repl"
 	mgrReplPass  = "repl"
 	mgrGroupName = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+
+	// Semi-sync IT Raft timing (align with Xenon): 2s heartbeat × 5 failures ≈ 10s primary fault.
+	semiSyncITHeartbeatTimeoutMs = 2000
+	semiSyncITElectionTimeoutMs    = 10000
+	semiSyncITAdmitDefeatHtCnt     = 5
+
+	// MGR IT uses faster timers for quicker bootstrap/election in tests.
+	mgrITHeartbeatTimeoutMs = 500
+	mgrITElectionTimeoutMs  = 1500
+	mgrITAdmitDefeatHtCnt   = 5
 )
+
+func applySemiSyncRaftIT(conf *config.Config) {
+	conf.Election.Raft.HeartbeatTimeout = semiSyncITHeartbeatTimeoutMs
+	conf.Election.Raft.ElectionTimeout = semiSyncITElectionTimeoutMs
+	conf.Election.Raft.AdmitDefeatHtCnt = semiSyncITAdmitDefeatHtCnt
+}
+
+func applyMGRRaftIT(conf *config.Config) {
+	conf.Election.Raft.HeartbeatTimeout = mgrITHeartbeatTimeoutMs
+	conf.Election.Raft.ElectionTimeout = mgrITElectionTimeoutMs
+	conf.Election.Raft.AdmitDefeatHtCnt = mgrITAdmitDefeatHtCnt
+}
 
 // BuildNeoHA compiles the neoha daemon to outPath (go build uses the module cache; always invoke it so dependency changes are picked up).
 func BuildNeoHA(ctx context.Context, repoRoot, outPath string) error {
@@ -65,7 +87,7 @@ func BuildNeoHA(ctx context.Context, repoRoot, outPath string) error {
 
 // NeoHABinFromEnv returns the neoha binary path or empty.
 func NeoHABinFromEnv() string {
-	return os.Getenv(EnvNeoHABin)
+	return LoadIntegrationSettings().NeoHABinPath()
 }
 
 // NewNeoHANode prepares directories for a NeoHA agent.
@@ -81,8 +103,8 @@ func NewNeoHANode(name, workDir, endpoint string, mysqlPort int) *NeoHANode {
 	}
 }
 
-// WriteSemiSyncConfig writes a NeoHA config for semi-sync integration tests.
-func (n *NeoHANode) WriteSemiSyncConfig(mysqlBase, defaultsFile string, peers []string) error {
+// WritePlainConfig writes a minimal NeoHA config for backup / xtrabackup tests.
+func (n *NeoHANode) WritePlainConfig(mysqlBase, defaultsFile, clusterWorkDir, mysqlDataDir string, peers []string) error {
 	if err := os.MkdirAll(n.MetaDir, 0o755); err != nil {
 		return err
 	}
@@ -97,9 +119,44 @@ func (n *NeoHANode) WriteSemiSyncConfig(mysqlBase, defaultsFile string, peers []
 	conf.Log.Level = "INFO"
 
 	conf.Election.Raft.MetaDatadir = n.MetaDir
-	conf.Election.Raft.HeartbeatTimeout = 500
-	conf.Election.Raft.ElectionTimeout = 1500
-	conf.Election.Raft.AdmitDefeatHtCnt = 5
+	applySemiSyncRaftIT(conf)
+	conf.Election.Raft.PurgeBinlogDisabled = true
+	conf.Election.Raft.LeaderStartCommand = "nop"
+	conf.Election.Raft.LeaderStopCommand = "nop"
+
+	conf.Database.Mysql.Version = "mysql80"
+	conf.Database.Mysql.Host = "127.0.0.1"
+	conf.Database.Mysql.Port = n.MySQLPort
+	conf.Database.Mysql.Basedir = mysqlBase
+	conf.Database.Mysql.DefaultsFile = defaultsFile
+	conf.Database.Mysql.ReplMode = model.ReplModeSemiSync
+	conf.Database.Mysql.MonitorDisabled = true
+
+	LoadIntegrationSettings().ApplyBackupConfig(conf, n.MySQLPort, mysqlBase, defaultsFile, mysqlDataDir)
+
+	if err := config.WriteConfig(n.ConfigPath, conf); err != nil {
+		return err
+	}
+	return writeCLIConfigPath(filepath.Dir(n.ConfigPath), n.ConfigPath)
+}
+
+// WriteSemiSyncConfig writes a NeoHA config for semi-sync integration tests.
+func (n *NeoHANode) WriteSemiSyncConfig(mysqlBase, defaultsFile, clusterWorkDir, mysqlDataDir string, peers []string) error {
+	if err := os.MkdirAll(n.MetaDir, 0o755); err != nil {
+		return err
+	}
+	if err := WritePeersJSON(filepath.Join(n.MetaDir, "peers.json"), peers); err != nil {
+		return err
+	}
+
+	conf := config.DefaultConfig()
+	conf.Scope = "neoha-it"
+	conf.Name = n.Name
+	conf.Endpoint = n.Endpoint
+	conf.Log.Level = "INFO"
+
+	conf.Election.Raft.MetaDatadir = n.MetaDir
+	applySemiSyncRaftIT(conf)
 	conf.Election.Raft.PurgeBinlogDisabled = true
 	conf.Election.Raft.LeaderStartCommand = "nop"
 	conf.Election.Raft.LeaderStopCommand = "nop"
@@ -116,6 +173,8 @@ func (n *NeoHANode) WriteSemiSyncConfig(mysqlBase, defaultsFile string, peers []
 	conf.Database.Mysql.MonitorDisabled = true
 	conf.Database.Mysql.SemiSyncTimeoutForTwoNodes = 10000
 
+	LoadIntegrationSettings().ApplyBackupConfig(conf, n.MySQLPort, mysqlBase, defaultsFile, mysqlDataDir)
+
 	if err := config.WriteConfig(n.ConfigPath, conf); err != nil {
 		return err
 	}
@@ -123,7 +182,7 @@ func (n *NeoHANode) WriteSemiSyncConfig(mysqlBase, defaultsFile string, peers []
 }
 
 // WriteConfig writes a NeoHA config for MGR integration tests.
-func (n *NeoHANode) WriteConfig(mysqlBase, defaultsFile string, peers []string) error {
+func (n *NeoHANode) WriteConfig(mysqlBase, defaultsFile, clusterWorkDir, mysqlDataDir string, peers []string) error {
 	if err := os.MkdirAll(n.MetaDir, 0o755); err != nil {
 		return err
 	}
@@ -138,9 +197,7 @@ func (n *NeoHANode) WriteConfig(mysqlBase, defaultsFile string, peers []string) 
 	conf.Log.Level = "INFO"
 
 	conf.Election.Raft.MetaDatadir = n.MetaDir
-	conf.Election.Raft.HeartbeatTimeout = 500
-	conf.Election.Raft.ElectionTimeout = 1500
-	conf.Election.Raft.AdmitDefeatHtCnt = 5
+	applyMGRRaftIT(conf)
 	conf.Election.Raft.PurgeBinlogDisabled = true
 	conf.Election.Raft.LeaderStartCommand = "nop"
 	conf.Election.Raft.LeaderStopCommand = "nop"
@@ -160,6 +217,8 @@ func (n *NeoHANode) WriteConfig(mysqlBase, defaultsFile string, peers []string) 
 	conf.Database.Mysql.SlaveSysVars = fmt.Sprintf(
 		"group_replication_group_name='%s';group_replication_local_address='127.0.0.1:%d';group_replication_group_seeds='127.0.0.1:13361,127.0.0.1:13362,127.0.0.1:13363'",
 		mgrGroupName, n.MySQLPort+55)
+
+	LoadIntegrationSettings().ApplyBackupConfig(conf, n.MySQLPort, mysqlBase, defaultsFile, mysqlDataDir)
 
 	if err := config.WriteConfig(n.ConfigPath, conf); err != nil {
 		return err

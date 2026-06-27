@@ -1,0 +1,37 @@
+# NeoHA integration test local settings (copy to it.local.yaml and edit).
+# Loaded automatically from test/integration/it.local.yaml, or set NEOHA_IT_CONFIG.
+# Each field falls back to the matching NEOHA_IT_* env var, then PATH, then defaults.
+#
+# Setup:
+#   cp test/integration/it.local.yaml.example test/integration/it.local.yaml
+#
+# Run full suite:
+#   make test-integration
+#
+# Run xtrabackup rebuildme test only:
+#   go test -tags=integration -v -timeout=10m -count=1 \
+#     -run TestNeoHAXtrabackupRebuildMe ./test/integration
+#
+# See test/integration/README.md for ports, SSH, and troubleshooting.
+
+# MySQL 8.0 build root (contains bin/mysqld)
+mysql-base: /home/wslu/work/mysql/mysql80-debug
+
+# Directory containing xtrabackup and xbstream (or .../bin if tools live there)
+xtrabackup-bindir: /home/wslu/work/mysql/xtrabackup-8.0.35
+
+# Optional work directory for IT artifacts (default: $TMPDIR/neoha-it)
+# workdir: /tmp/neoha-it
+
+# Optional pre-built binaries (else built under workdir/bin on first run)
+# neoha-bin: /path/to/neoha
+# neohactl-bin: /path/to/neohactl
+
+# SSH target for xtrabackup | ssh … | xbstream pipeline (usually localhost)
+ssh-host: 127.0.0.1
+# WSL: map Windows OpenSSH to localhost, e.g. 2222
+ssh-port: 22
+# ssh-user defaults to $USER when empty
+ssh-user: ""
+# Leave empty for key-based auth; set for sshpass-based auth
+ssh-passwd: ""

@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 const (
@@ -92,21 +93,50 @@ func (c *Cluster) Setup(ctx context.Context) error {
 	return c.SetupFresh(ctx, true)
 }
 
-// SetupFresh initializes nodes; when clean is true, stale workdir/processes are removed first.
+// SetupFresh initializes nodes; when clean is true, stale processes are stopped and
+// the workdir is removed only if datadirs are missing or incomplete.
 func (c *Cluster) SetupFresh(ctx context.Context, clean bool) error {
 	if clean {
 		KillProcessesOnWorkDir(c.WorkDir)
-		_ = os.RemoveAll(c.WorkDir)
+		if !c.datadirsReady() {
+			_ = os.RemoveAll(c.WorkDir)
+		}
 	}
 	if err := os.MkdirAll(c.WorkDir, 0o755); err != nil {
 		return err
 	}
+	var wg sync.WaitGroup
+	errCh := make(chan error, len(c.Nodes))
 	for _, node := range c.Nodes {
-		if err := node.backend.InitNode(ctx, node); err != nil {
-			return fmt.Errorf("init node %s: %w", node.Name, err)
+		wg.Add(1)
+		go func(n *Node) {
+			defer wg.Done()
+			if err := n.backend.InitNode(ctx, n); err != nil {
+				errCh <- fmt.Errorf("init node %s: %w", n.Name, err)
+			}
+		}(node)
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func (c *Cluster) datadirsReady() bool {
+	if len(c.Nodes) == 0 {
+		return false
+	}
+	for _, node := range c.Nodes {
+		mysqlDir := filepath.Join(c.WorkDir, node.Name, "data", "mysql")
+		if _, err := os.Stat(mysqlDir); err != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // StartAll starts every node and waits until ready.
@@ -137,13 +167,10 @@ func (c *Cluster) Teardown(ctx context.Context) error {
 
 // MySQLBaseFromEnv returns the MySQL installation root or empty if unset.
 func MySQLBaseFromEnv() string {
-	return os.Getenv(EnvMySQLBase)
+	return LoadIntegrationSettings().MySQLBase()
 }
 
 // WorkDirFromEnv returns the integration test work directory.
 func WorkDirFromEnv() string {
-	if dir := os.Getenv(EnvWorkDir); dir != "" {
-		return dir
-	}
-	return filepath.Join(os.TempDir(), "neoha-it")
+	return LoadIntegrationSettings().WorkDir()
 }

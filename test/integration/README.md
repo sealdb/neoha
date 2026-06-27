@@ -13,20 +13,157 @@ They use the Go `integration` build tag.
 
 NeoHA behaviour (repl user, MGR bootstrap, Raft election) is exercised through **agent startup + neorpc**, not duplicate SQL in the harness.
 
+### Raft timers in integration tests
+
+| Mode | `heartbeat-timeout` | `admit-defeat-hearbeat-count` | Primary fault detection |
+|------|---------------------|-------------------------------|-------------------------|
+| **Semi-sync** | **2000 ms** (2 s) | **5** | **~10 s** (5 consecutive failed heartbeats) |
+| **MGR** | 500 ms | 5 | Faster bootstrap/election in IT only |
+
+Semi-sync IT follows Xenon-style timing: leader heartbeats every 2 s; after 5 rounds without enough acks (or followers miss leader heartbeats for ~`election-timeout` 10 s), failover should complete within roughly **10–15 s** once the cluster is already up. MGR tests keep shorter timers for quicker cluster formation.
+
+Constants live in `harness/neoha.go` (`semiSyncIT*` / `mgrIT*`).
+
 ## Prerequisites
 
 - MySQL 8.0 debug build with `group_replication` plugin (MGR tests) and semi-sync plugins (`semisync_master.so`, `semisync_slave.so`)
-- Default path: `/home/wslu/work/mysql/mysql80-debug`
+- **Xtrabackup 8.0** (`xtrabackup`, `xbstream`) for backup tests
+- **SSH to localhost** (key-based or `sshpass` + password) for xtrabackup stream
+
+### Tool paths (config file → env → PATH → default)
+
+Copy `test/integration/it.local.yaml.example` to `test/integration/it.local.yaml`, or export env vars:
+
+| Setting | Env var | Default |
+|---------|---------|---------|
+| MySQL base | `NEOHA_IT_MYSQL_BASE` | `/home/wslu/work/mysql/mysql80-debug` |
+| Xtrabackup bin dir | `NEOHA_IT_XTRABACKUP_BINDIR` | `/home/wslu/work/mysql/xtrabackup-8.0.35` or `PATH` |
+| IT config file | `NEOHA_IT_CONFIG` | auto: `test/integration/it.local.yaml` |
+| Work dir | `NEOHA_IT_WORKDIR` | `$TMPDIR/neoha-it` |
+| SSH port | `NEOHA_IT_SSH_PORT` | `22` (example uses `2222` for WSL) |
+
+```bash
+cp test/integration/it.local.yaml.example test/integration/it.local.yaml
+# edit mysql-base, xtrabackup-bindir, ssh-port (e.g. 2222), ssh-user as needed
+```
 
 ## Run
 
+### Quick start
+
+```bash
+# 1. Local config (gitignored)
+cp test/integration/it.local.yaml.example test/integration/it.local.yaml
+# Edit mysql-base, xtrabackup-bindir, ssh-port (WSL often 2222), ssh-user if needed
+
+# 2. Full integration suite (~3–5 min after datadirs exist)
+make test-integration
+```
+
+`make test-integration` pre-builds `bin/neoha-it.test`, then runs all tests with a 10-minute timeout. It passes through `NEOHA_IT_MYSQL_BASE` and `NEOHA_IT_XTRABACKUP_BINDIR` when set; otherwise it uses the defaults shown in the Makefile.
+
+### Environment variables
+
+| Variable | Purpose |
+|----------|---------|
+| `NEOHA_IT_MYSQL_BASE` | MySQL 8.0 build root (`bin/mysqld`) |
+| `NEOHA_IT_XTRABACKUP_BINDIR` | Directory with `xtrabackup` and `xbstream` |
+| `NEOHA_IT_CONFIG` | Override IT config file path |
+| `NEOHA_IT_WORKDIR` | Artifact directory (default `$TMPDIR/neoha-it`) |
+| `NEOHA_IT_BIN` / `NEOHA_IT_CTL_BIN` | Pre-built `neoha` / `neohactl` (else built under `workdir/bin`) |
+| `NEOHA_IT_SSH_PORT` | SSH port when not using `it.local.yaml` |
+
+Example:
+
 ```bash
 export NEOHA_IT_MYSQL_BASE=/home/wslu/work/mysql/mysql80-debug
-export NEOHA_IT_WORKDIR=/tmp/neoha-it   # optional
-export NEOHA_IT_BIN=/path/to/neoha
-export NEOHA_IT_CTL_BIN=/path/to/neohactl  # optional
-
+export NEOHA_IT_XTRABACKUP_BINDIR=/home/wslu/work/mysql/xtrabackup-8.0.35
+export NEOHA_IT_WORKDIR=/tmp/neoha-it
 make test-integration
+```
+
+### `go test` (single test or custom flags)
+
+Build tag **`integration`** is required.
+
+```bash
+# All integration tests
+go test -tags=integration -v -timeout=10m -count=1 ./test/integration
+
+# MGR cluster formation
+go test -tags=integration -v -timeout=5m -count=1 -run TestNeoHA3NodeMGR ./test/integration
+
+# Semi-sync cluster
+go test -tags=integration -v -timeout=5m -count=1 -run TestNeoHA3NodeSemiSync ./test/integration
+
+# Xtrabackup rebuildme (requires SSH + xtrabackup; see below)
+go test -tags=integration -v -timeout=10m -count=1 -run TestNeoHAXtrabackupRebuildMe ./test/integration
+```
+
+Pre-compile to avoid a long silent compile phase:
+
+```bash
+go test -tags=integration -c -o bin/neoha-it.test ./test/integration
+NEOHA_IT_MYSQL_BASE=... NEOHA_IT_XTRABACKUP_BINDIR=... \
+  bin/neoha-it.test -test.v -test.timeout=10m -test.count=1
+```
+
+### Xtrabackup / `rebuildme` test
+
+`TestNeoHAXtrabackupRebuildMe` exercises the production path:
+
+1. Two-node semi-sync cluster (MySQL `13326`/`13327`, NeoHA Raft `18131`/`18132`)
+2. Data sync to replica, then `neohactl mysql rebuildme --from=<leader> --force` on the follower
+3. Assert replication and row data after rebuild
+
+**Extra prerequisites:**
+
+- `xtrabackup` and `xbstream` on PATH or under `xtrabackup-bindir`
+- SSH to localhost for the `xtrabackup | ssh … xbstream` pipeline (key-based or `sshpass`)
+
+**WSL example** (`it.local.yaml`):
+
+```yaml
+ssh-host: 127.0.0.1
+ssh-port: 2222
+ssh-user: ""          # defaults to $USER
+ssh-passwd: ""        # empty = key auth
+```
+
+Verify SSH before running:
+
+```bash
+ssh -p 2222 -o BatchMode=yes $(whoami)@127.0.0.1 echo ok
+```
+
+Run only the rebuildme test:
+
+```bash
+go test -tags=integration -v -timeout=10m -count=1 \
+  -run TestNeoHAXtrabackupRebuildMe ./test/integration
+```
+
+### Ports used by tests
+
+| Scenario | MySQL ports | NeoHA Raft ports |
+|----------|-------------|------------------|
+| MGR scaffold / NeoHA MGR | 13306–13308 | 18081–18103 (per test) |
+| Semi-sync | 13316–13318 | 18111–18123 |
+| Xtrabackup rebuildme | 13326–13327 | 18131–18132 |
+
+If a run aborts mid-test, free ports or use a fresh `NEOHA_IT_WORKDIR`.
+
+### First run vs later runs
+
+The harness **initializes MySQL datadirs** on first use (roughly 20–30s per node, parallelized across nodes). Later runs **reuse** existing datadirs under `$NEOHA_IT_WORKDIR/<cluster-name>/` when the `mysql` system schema is already present.
+
+IT `my.cnf` puts `socket` and `pid-file` inside `datadir` so `rebuildme`’s datadir wipe does not leave stale socket files.
+
+To force a clean slate:
+
+```bash
+rm -rf "${NEOHA_IT_WORKDIR:-/tmp/neoha-it}"
+pkill -f 'defaults-file=/tmp/neoha-it' || true
 ```
 
 ## Scenarios
@@ -39,6 +176,7 @@ make test-integration
 | `TestNeoHAMGRFailoverMajorityLoss` | MGR quorum lost; NeoHA Raft bootstrap on sole survivor |
 | `TestNeoHA3NodeSemiSync` | 3 NeoHA agents → Raft leader → semi-sync replicas running |
 | `TestNeoHASemiSyncFailoverMinority` | Primary mysqld loss → Raft re-elects → replication re-wired |
+| `TestNeoHAXtrabackupRebuildMe` | 2-node semi-sync: `neohactl mysql rebuildme --from=<leader> --force` (xtrabackup stream, apply-log, re-slave) |
 
 ## Repository layout
 
@@ -68,6 +206,8 @@ test/integration/
 ├── mgr_3node_test.go
 ├── mgr_neoha_test.go
 ├── semisync_neoha_test.go
+├── xtrabackup_neoha_test.go
+├── it.local.yaml.example
 └── README.md
 ```
 
@@ -75,8 +215,25 @@ test/integration/
 
 ### `go test` appears stuck with no output
 
-Use `make test-integration` or precompile: `go test -tags=integration -c -o bin/neoha-it.test ./test/integration`.
+The first `go test` compiles the whole module and can take 30s+ with no logs. Prefer:
+
+```bash
+make test-integration
+# or
+go test -tags=integration -c -o bin/neoha-it.test ./test/integration && bin/neoha-it.test -test.v ...
+```
 
 ### Stale processes / ports
 
-Set `NEOHA_IT_WORKDIR` to a fresh directory or kill leftover mysqld on ports 13306–13308 (MGR) / 13316–13318 (semi-sync).
+```bash
+pkill -f 'defaults-file=/tmp/neoha-it' || true
+rm -rf "${NEOHA_IT_WORKDIR:-/tmp/neoha-it}/<cluster-name>"
+```
+
+Common ports: MGR `13306–13308`, semi-sync `13316–13318`, xtrabackup `13326–13327`.
+
+### Xtrabackup test hangs on `rebuildme`
+
+- Confirm SSH: `ssh -p <port> $(whoami)@127.0.0.1 echo ok`
+- Confirm tools: `ls "$NEOHA_IT_XTRABACKUP_BINDIR"/xtrabackup "$NEOHA_IT_XTRABACKUP_BINDIR"/xbstream`
+- Check NeoHA logs under `$NEOHA_IT_WORKDIR/<cluster>/neoha/*/neoha.log` for backup or socket errors

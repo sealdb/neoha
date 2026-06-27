@@ -34,7 +34,7 @@ const (
 
 // NeoHACtlBinFromEnv returns the neohactl binary path or empty.
 func NeoHACtlBinFromEnv() string {
-	return os.Getenv(EnvNeoHACtlBin)
+	return LoadIntegrationSettings().NeoHACtlBinPath()
 }
 
 // BuildNeoHActl compiles neohactl to outPath.
@@ -49,6 +49,18 @@ func BuildNeoHActl(ctx context.Context, repoRoot, outPath string) error {
 		return fmt.Errorf("build neohactl: %w: %s", err, string(out))
 	}
 	return nil
+}
+
+// RunNeoHActlMysqlRebuildMe runs neohactl mysql rebuildme on a replica node.
+func RunNeoHActlMysqlRebuildMe(ctx context.Context, ctlBin, ctlDir, from string, force bool) error {
+	args := []string{"mysql", "rebuildme"}
+	if from != "" {
+		args = append(args, "--from="+from)
+	}
+	if force {
+		args = append(args, "--force")
+	}
+	return RunNeoHActl(ctx, ctlBin, ctlDir, args...)
 }
 
 // RunNeoHActl runs neohactl in ctlDir (must contain config.path).

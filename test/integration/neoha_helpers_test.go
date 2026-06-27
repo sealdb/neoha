@@ -33,7 +33,7 @@ import (
 	"github.com/sealdb/neoha/test/integration/harness"
 )
 
-type neoHAConfigWriter func(n *harness.NeoHANode, mysqlBase, defaultsFile string, peers []string) error
+type neoHAConfigWriter func(n *harness.NeoHANode, mysqlBase, defaultsFile, clusterWorkDir, mysqlDataDir string, peers []string) error
 
 func buildNeoHABin(t *testing.T, ctx context.Context) string {
 	t.Helper()
@@ -96,7 +96,7 @@ func startNeoHACluster(t *testing.T, ctx context.Context, cluster *harness.Clust
 		nodes[i] = harness.NewNeoHANode(fmt.Sprintf("n%d", i+1), cluster.WorkDir, endpoints[i], cluster.Nodes[i].Port)
 	}
 	for i := range nodes {
-		assert.NoError(t, writeConfig(nodes[i], mysqlBase, cluster.Nodes[i].Config, endpoints))
+		assert.NoError(t, writeConfig(nodes[i], mysqlBase, cluster.Nodes[i].Config, cluster.WorkDir, cluster.Nodes[i].DataDir, endpoints))
 	}
 
 	t.Cleanup(func() {
@@ -128,12 +128,12 @@ func startNeoHACluster(t *testing.T, ctx context.Context, cluster *harness.Clust
 	return nodes, endpoints
 }
 
-func writeMGRConfig(n *harness.NeoHANode, mysqlBase, defaultsFile string, peers []string) error {
-	return n.WriteConfig(mysqlBase, defaultsFile, peers)
+func writeMGRConfig(n *harness.NeoHANode, mysqlBase, defaultsFile, clusterWorkDir, mysqlDataDir string, peers []string) error {
+	return n.WriteConfig(mysqlBase, defaultsFile, clusterWorkDir, mysqlDataDir, peers)
 }
 
-func writeSemiSyncConfig(n *harness.NeoHANode, mysqlBase, defaultsFile string, peers []string) error {
-	return n.WriteSemiSyncConfig(mysqlBase, defaultsFile, peers)
+func writeSemiSyncConfig(n *harness.NeoHANode, mysqlBase, defaultsFile, clusterWorkDir, mysqlDataDir string, peers []string) error {
+	return n.WriteSemiSyncConfig(mysqlBase, defaultsFile, clusterWorkDir, mysqlDataDir, peers)
 }
 
 func neoNodeByEndpoint(neoNodes []*harness.NeoHANode, endpoint string) *harness.NeoHANode {

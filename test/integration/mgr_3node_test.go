@@ -23,8 +23,6 @@ package integration
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -40,13 +38,8 @@ var (
 
 func requireMySQL80(t *testing.T) (*harness.MySQL80, string) {
 	t.Helper()
-	base := harness.MySQLBaseFromEnv()
-	if base == "" {
-		t.Skip("set NEOHA_IT_MYSQL_BASE to the MySQL 8.0 build root (contains bin/mysqld)")
-	}
-	if _, err := os.Stat(filepath.Join(base, "bin", "mysqld")); err != nil {
-		t.Skipf("mysqld not found under %s/bin: %v", base, err)
-	}
+	settings := harness.LoadIntegrationSettings()
+	base, _ := settings.RequireMySQL80(t)
 	return harness.NewMySQL80(base), base
 }
 

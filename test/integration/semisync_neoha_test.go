@@ -125,9 +125,9 @@ func TestNeoHASemiSyncFailoverMinority(t *testing.T) {
 	remainEP := harness.EndpointsForClusterNodes(neoNodes, cluster, remain)
 	assert.Len(t, remainEP, 2)
 
-	leaderCtx, leaderCancel := context.WithTimeout(context.Background(), 90*time.Second)
+	leaderCtx, leaderCancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer leaderCancel()
-	t.Log("failover: wait NeoHA Raft LEADER on survivors")
+	t.Log("failover: wait NeoHA Raft LEADER on survivors (semi-sync IT: ~10s after primary fault)")
 	newLeaderEP, err := harness.WaitRaftLeader(leaderCtx, remainEP)
 	assert.NoError(t, err)
 

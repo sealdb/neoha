@@ -54,6 +54,10 @@ func testMysqlRPCStatus(t *testing.T, GTID *model.GTID, replMode model.MysqlRepl
 	want.GTID = *GTID
 	want.Status = string(model.MysqlDead)
 	want.Stats = &model.MysqlStats{}
+	want.MGRStatus = &model.MGRStatus{
+		Role:  "UNKNOWN",
+		State: model.MGRStateOffline,
+	}
 
 	got := rsp
 	assert.Equal(t, want, got)

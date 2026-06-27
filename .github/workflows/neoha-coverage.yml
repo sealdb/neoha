@@ -1,29 +1,43 @@
 # See https://github.com/actions/setup-go
 name: NeoHA Coverage
-on: [push, pull_request]
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: neoha-coverage-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
-      - name: Set up Go
-        uses: actions/setup-go@v4
-        with:
-          # go-version: 1.20.10
-          # go-version: '>=1.20.5'
-          go-version: '1.20'
-        id: go
-
       - name: Check out code
         uses: actions/checkout@v4
 
-      - name: Coverage
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Generate coverage
         run: |
           export TERM=xterm
-          export PATH=$PATH:$(go env GOPATH)/bin
-          # Only private respository need
-          # Every acount or organization has a unique token
-          #export CODECOV_TOKEN='1e6f76e1-72ca-4875-b950-1d3b8c16c3c1'
-          make coverage
-          #bash <(curl -s https://codecov.io/bash) -f "!mock.go"
-          bash <(curl -s https://codecov.io/bash) -f "!mock.go" -t 1e6f76e1-72ca-4875-b950-1d3b8c16c3c1
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          make coverage-ci
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.out
+          fail_ci_if_error: false

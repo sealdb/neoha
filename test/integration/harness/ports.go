@@ -21,6 +21,7 @@ package harness
 import (
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
 	"strings"
 	"syscall"
@@ -61,9 +62,10 @@ func KillProcessesOnWorkDir(workDir string) {
 	if err != nil {
 		return
 	}
+	self := os.Getpid()
 	for _, line := range strings.Fields(string(out)) {
 		pid := 0
-		if _, err := fmt.Sscanf(line, "%d", &pid); err != nil || pid <= 0 {
+		if _, err := fmt.Sscanf(line, "%d", &pid); err != nil || pid <= 0 || pid == self {
 			continue
 		}
 		_ = syscall.Kill(pid, syscall.SIGTERM)

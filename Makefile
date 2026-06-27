@@ -21,7 +21,7 @@ export LDFLAGS :=
 COVERAGE_OUT := coverage.out
 COVERAGE_LOG := coverage.log
 
-.PHONY: build clean install fmt test testbase testconfig testdatabase testmanager testelection testserver testcmd test-integration vet coverage
+.PHONY: build clean install fmt test testbase testconfig testdatabase testmanager testelection testserver testcmd test-integration vet coverage coverage-ci
 
 build: LDFLAGS   += $(shell GOPATH=${GOPATH} build/ldflags.sh)
 build:
@@ -38,6 +38,7 @@ clean:
 	@go clean
 	@rm -f bin/*
 	@rm -f coverage*
+	@rm -rf .coverage-parts
 
 install:
 	@echo "--> Installing..."
@@ -69,7 +70,7 @@ testmanager:
 	go test -v ./internal/manager/mysqld/...
 	# go test -v ./internal/manager/postmaster/...
 testelection:
-	go test -v ./internal/election/raft/...
+	go test -timeout=20m -v ./internal/election/raft/...
 	# go test -v ./internal/election/etcd/...
 testserver:
 	go test -v ./internal/server/...
@@ -83,6 +84,7 @@ test-integration:
 	@echo "--> Pre-building test binary (avoids silent compile)..."
 	go test -tags=integration -c -o bin/neoha-it.test ./test/integration
 	NEOHA_IT_MYSQL_BASE=$${NEOHA_IT_MYSQL_BASE:-/home/wslu/work/mysql/mysql80-debug} \
+	NEOHA_IT_XTRABACKUP_BINDIR=$${NEOHA_IT_XTRABACKUP_BINDIR:-/home/wslu/work/mysql/xtrabackup-8.0.35} \
 		bin/neoha-it.test -test.v -test.timeout=10m -test.count=1
 
 PKGS =	./internal/base/common/... \
@@ -102,8 +104,31 @@ PKGS =	./internal/base/common/... \
 vet:
 	go vet $(PKGS)
 
-coverage:
-	#echo > ${COVERAGE_LOG}
-	go test -v -covermode=set -coverprofile=${COVERAGE_OUT} ./... #| tee -a ${COVERAGE_LOG}
-	#grep "FAIL:" ${COVERAGE_LOG} ; if [[ $? -eq 0 ]]; then exit 1 ; fi
+coverage: coverage-ci
 	go tool cover -html=${COVERAGE_OUT}
+
+# Run each package separately so slow packages (especially raft) show progress.
+# Raft with -covermode=atomic takes ~5–10 min; that is expected, not a hang.
+coverage-ci:
+	@rm -rf .coverage-parts ${COVERAGE_OUT}
+	@mkdir -p .coverage-parts
+	@part=0; \
+	for pkg in $(PKGS); do \
+		part=$$((part + 1)); \
+		out=".coverage-parts/$$part.out"; \
+		if [ "$$pkg" = "./internal/election/raft/..." ]; then \
+			timeout=25m; \
+			verbose=-v; \
+			echo "--> Coverage $$pkg (slow: ~5–10 min with instrumentation)"; \
+		else \
+			timeout=10m; \
+			verbose=; \
+			echo "--> Coverage $$pkg"; \
+		fi; \
+		go test -count=1 -timeout=$$timeout -covermode=atomic \
+			-coverprofile=$$out $$verbose $$pkg || exit 1; \
+	done
+	@echo "--> Merging coverage profiles..."
+	@{ echo "mode: atomic"; grep -h -v '^mode:' .coverage-parts/*.out; } > ${COVERAGE_OUT}
+	@rm -rf .coverage-parts
+	go tool cover -func=${COVERAGE_OUT}

@@ -1,8 +1,8 @@
-[![Github Actions Status](https://github.com/sealdb/neoha/workflows/NeoHA%20Build/badge.svg?event=push)](https://github.com/sealdb/neoha/actions?query=workflow%3A%22NeoHA+Build%22+event%3Apush)
-[![Github Actions Status](https://github.com/sealdb/neoha/workflows/NeoHA%20Test/badge.svg?event=push)](https://github.com/sealdb/neoha/actions?query=workflow%3A%22NeoHA+Test%22+event%3Apush)
-[![Github Actions Status](https://github.com/sealdb/neoha/workflows/NeoHA%20Coverage/badge.svg)](https://github.com/sealdb/neoha/actions?query=workflow%3A%22NeoHA+Coverage%22)
-[![Go Report Card](https://goreportcard.com/badge/github.com/sealdb/neoha)](https://goreportcard.com/report/github.com/sealdb/neoha)
-[![codecov](https://codecov.io/gh/sealdb/neoha/branch/main/graph/badge.svg?token=XPLUHW3DU3)](https://codecov.io/gh/sealdb/neoha)
+[![NeoHA Build](https://github.com/sealdb/neoha/actions/workflows/neoha-build.yml/badge.svg?branch=main)](https://github.com/sealdb/neoha/actions/workflows/neoha-build.yml)
+[![NeoHA Test](https://github.com/sealdb/neoha/actions/workflows/neoha-test.yml/badge.svg?branch=main)](https://github.com/sealdb/neoha/actions/workflows/neoha-test.yml)
+[![NeoHA Coverage](https://github.com/sealdb/neoha/actions/workflows/neoha-coverage.yml/badge.svg?branch=main)](https://github.com/sealdb/neoha/actions/workflows/neoha-coverage.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/sealdb/neoha.svg)](https://pkg.go.dev/github.com/sealdb/neoha)
+[![codecov](https://codecov.io/gh/sealdb/neoha/branch/main/graph/badge.svg)](https://codecov.io/gh/sealdb/neoha)
 
 # NeoHA
 
@@ -16,14 +16,53 @@ Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
 
 # Unit Tests
 
-depend:
+```bash
+make test      # unit tests (~5 min; raft package is the slowest)
+make coverage  # unit-test coverage (~8–15 min; raft alone ~5–10 min with -covermode=atomic)
+```
 
-- watch:
-  - On Ubuntu/CentOS: built-in system
-  - On MacOS: install command is `brew install watch`
+CI runs `make build`, `make test`, and `make coverage-ci` on push/PR to `main` (see [.github/workflows/](.github/workflows/)).
 
+# Integration Tests
+
+Requires MySQL 8.0 debug build, optional Xtrabackup + SSH for backup tests. See [test/integration/README.md](test/integration/README.md).
+
+```bash
+cp test/integration/it.local.yaml.example test/integration/it.local.yaml
+make test-integration
+```
 
 # Todo List
+
+详细优先级与架构重构备忘见 [docs/TODO.md](docs/TODO.md)（当前：**单元测试全绿**、**集成测试提速 ~20s 选主**，Raft 重构暂缓）。
+
+对于 MySQL 的本地事务：
+
+> 腾讯 TDSQL 对本地事务，如果是 DML，就用工具闪回；如果是 DDL，就只能重建从库。
+
+TODO:
+
+1. 管理所有关系型单机数据库，比如 MySQL、PG、Oracle
+2. EverDB 正在使用类似 radon 的分布式中间件来做单个 MySQL 集群的高可用，想用 xenon 做单机 MySQL 的高可用
+3. 慢日志分析展示（将 pt-xxxx 分析结果的前 N 条缓存起来 ）
+4. 选举条件支持比较 GTID 和 binlog position 两种方式。
+5. 主从节点 IO hang 或者 主 hang 从不 hang 的情况
+6. ifdown 网卡，短时间内 ifup 拉起来？目前 Plus 是靠外围 deploy 脚本来做（其实没有）
+7. 从库主动添加本地事务，没有被标记 INVALID 状态？
+8. 删除 MySQL 数据目录的情况，貌似 MySQL 依然可以操作写事务？
+9. 整合 mysql 的 driver ：go-mysql-driver、go-mysqlstack，
+    pg 的 driver ：https://github.com/jackc/pgx
+    其中 PG 的 driver 项目 star 很高，并且其中各个子mod可以独立使用
+
+- 改进点：
+  - 功能层面：很多功能原计划做在云平台层，实际上做到该组件中会更好一些
+    - 慢日志分析：
+    - binlog 分析：比如快速找到某条 GTID 对应的事务信息
+    - 备份恢复：
+    - 闪回：只能闪回 DML，不能闪回 DDL
+  - 代码架构层面：
+    - 将 raft 层抽象出来，那么就不仅仅能支持 mysql，凡是具有同样特点的高可用组件，都可以嵌入进去
+
 
 - 基础代码
   - [ ] 支持 MySQL 5.6、5.7、8.0
@@ -51,10 +90,6 @@ mysql> show processlist;
 8 rows in set (0.00 sec)
 ```
 
-- [ ] cli
-  - 借鉴xenoncli，不同在于要添加前缀指令，比如 neohacli mysql cluster gtid
-- [ ] ctl
-  - 借鉴 xenon ctl，也要添加前缀
 - [ ] 重构测试代码，即将重复代码封装成函数，放在 *_test.go或mock.go文件中
 - [ ] 支持 PostgreSQL
 - [ ] 支持其他选举工具
@@ -69,4 +104,4 @@ mysql> show processlist;
   - 部署手册
   - 运维手册
   - 原理
-- [ ] 编写集成测试
+- [x] 编写集成测试（见 [test/integration/README.md](test/integration/README.md)）

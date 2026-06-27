@@ -1,6 +1,9 @@
 bin/*
+test/integration/it.local.yaml
+test/integration/it.local.json
 testdir
 coverage*
+.coverage-parts/
 *.outs
 tags
 .vscode

@@ -828,6 +828,8 @@ func NewMockGTIDA(replMode model.MysqlReplMode) *MockGTID {
 	} else {
 		mock.GetReplModeFn = GetReplModeMGRFn
 		mock.SetReplModeFn = SetReplModeMGRFn
+		// Caught-up MGR GTID (Txns_Behind_Master == "0") for Promotable / trytoleader paths.
+		mock.GetMGRGTIDFn = GetMGRGTIDX1CaughtUp
 	}
 	return mock
 }
@@ -1175,6 +1177,7 @@ func GetMasterGTIDNull(db *sql.DB) (*model.GTID, error) {
 // NewMockGTIDGetSubtractError mock.
 func NewMockGTIDGetGTIDSubtractError() *MockGTID {
 	mock := defaultMockGTID()
+	mock.GetMasterGTIDFn = GetMasterGTIDE1
 	mock.GetGTIDSubtractFn = GetGTIDSubtractError
 	return mock
 }

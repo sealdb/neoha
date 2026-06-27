@@ -73,6 +73,7 @@ func mockRafts(log *nlog.Log, conf *config.Config, port int, count int, idleStar
 	var raft *Raft
 	rafts := []*Raft{}
 	rpcs := []*nrpc.Service{}
+	dbs := []*database.Database{}
 	metaDirs := []string{}
 	ip, _ := common.GetLocalIP()
 
@@ -108,6 +109,7 @@ func mockRafts(log *nlog.Log, conf *config.Config, port int, count int, idleStar
 			db.GetMysql().SetMysqlHandler(mysql.NewMockGTIDByNodes(count, -1, i))
 		}
 		db.Start()
+		dbs = append(dbs, db)
 
 		// setup raft
 		initState := FOLLOWER
@@ -147,6 +149,9 @@ func mockRafts(log *nlog.Log, conf *config.Config, port int, count int, idleStar
 		for i, r := range rafts {
 			rpcs[i].Stop()
 			r.Stop()
+		}
+		for _, db := range dbs {
+			db.Stop()
 		}
 	}
 }

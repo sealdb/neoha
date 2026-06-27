@@ -99,6 +99,11 @@ func testCLIRaftCommand(t *testing.T, replMode model.MysqlReplMode) {
 
 		// trytoleader
 		{
+			for _, srv := range servers {
+				if srv.Address() == leader {
+					server.MockPrepareTryToLeader(srv, replMode)
+				}
+			}
 			cmd := NewRaftCommand()
 			_, err := executeCommand(cmd, "trytoleader")
 			assert.Nil(t, err)

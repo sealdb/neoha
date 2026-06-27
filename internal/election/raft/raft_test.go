@@ -632,29 +632,29 @@ func testRaftLeaderDownAndUp(t *testing.T, replMode model.MysqlReplMode) {
 
 	// 5. wait a pingtimeout, wait new-leader election from 2 FOLLOWER
 	{
+		imoldleader := whoisleader
 		MockWaitMySQLPingTimeout()
 		if replMode == model.ReplModeMGR {
 			MockResetMGRHandlers(rafts)
 		}
-		MockWaitLeaderEggs(rafts, 1, replMode, false, -1)
+		if idx := MockWaitLeaderEggs(rafts, 1, replMode, false, imoldleader); idx >= 0 && idx != imoldleader {
+			whoisleader = idx
+		}
 
 		got = 0
-		imoldleader := whoisleader
 		want = (LEADER + FOLLOWER + FOLLOWER)
 		for i, raft := range rafts {
 			got += raft.getState()
-			if raft.getState() == LEADER {
-				// skip the old-leader
-				if imoldleader != i {
-					whoisleader = i
-				}
+			if raft.getState() == LEADER && imoldleader != i {
+				whoisleader = i
 			}
 		}
 
 		newleader = rafts[whoisleader]
 
-		// [LEADER, LEADER, FOLLOWER]
+		// [LEADER, FOLLOWER, FOLLOWER] (old leader may still think it is LEADER)
 		assert.Equal(t, want, got)
+		assert.NotEqual(t, imoldleader, whoisleader, "expected a new leader after partitioned leader stopped heartbeat")
 	}
 
 	// 6.  old-leader reset handlers to work
@@ -1589,7 +1589,10 @@ func testRaftLeaderPurgeBinlog(t *testing.T, replMode model.MysqlReplMode) {
 		leaderIdx := MockFindLeader(rafts)
 		assert.NotEqual(t, -1, leaderIdx)
 		if replMode == model.ReplModeSemiSync {
-			assert.Equal(t, 2, leaderIdx)
+			assert.True(t, MockWaitUntil(15*time.Second, 50*time.Millisecond, func() bool {
+				return MockFindLeader(rafts) == 2
+			}), "expected rafts[2] (GTIDX5) to become leader")
+			leaderIdx = 2
 		}
 		want := (LEADER + FOLLOWER + FOLLOWER)
 		got = 0
@@ -2027,12 +2030,16 @@ func testRaftLeaderAckLessThanQuorum(t *testing.T, replMode model.MysqlReplMode)
 		raft.Start()
 	}
 
+	if replMode == model.ReplModeMGR {
+		MockResetMGRHandlers(rafts)
+	}
+
 	var got State
 	var whoisleader int
 	// check new leader
 	{
 
-		MockWaitLeaderEggs(rafts, 1, replMode, false, -1)
+		MockWaitLeaderEggs(rafts, 1, replMode, replMode == model.ReplModeMGR, -1)
 		want := (LEADER + FOLLOWER + FOLLOWER)
 		for i, raft := range rafts {
 			got += raft.getState()
@@ -2048,7 +2055,8 @@ func testRaftLeaderAckLessThanQuorum(t *testing.T, replMode model.MysqlReplMode)
 	{
 		leader := rafts[whoisleader]
 		leader.L.setProcessHeartbeatResponseHandler(leader.mockLeaderProcessSendHeartbeatResponse)
-		for i := 0; i < 11; i++ {
+		// Bounded wait for a few heartbeat/election periods (avoid long fixed loops on CI).
+		for i := 0; i < 3; i++ {
 			MockWaitSomeElectionTimeout(rafts, 2)
 		}
 	}
@@ -2293,22 +2301,25 @@ func testRaftElectionUnderFollowerAndCandidateAlternate(t *testing.T, replMode m
 		MockStateTransition(rafts[2], IDLE)
 	}
 
-	// 5. wait 8 times the election timeout
-	time.Sleep(time.Millisecond * time.Duration(rafts[0].getElectionTimeout()*8))
-
-	//6. check if rafts[1] is the leader
+	// 5. wait until rafts[1] is leader, rafts[0] follower, rafts[2] idle
 	{
-		var got State
-		var whoisleader int
 		want := (FOLLOWER + LEADER + IDLE)
-		for i, raft := range rafts {
-			got += raft.getState()
-			if raft.getState() == LEADER {
-				whoisleader = i
-			}
+		waitTimeout := 15 * time.Second
+		if replMode == model.ReplModeMGR {
+			MockResetMGRHandlers(rafts)
+			waitTimeout = 30 * time.Second
 		}
-		assert.Equal(t, want, got)
-		assert.Equal(t, whoisleader, 1)
+		assert.True(t, MockWaitUntil(waitTimeout, 50*time.Millisecond, func() bool {
+			got := State(0)
+			whoisleader := -1
+			for i, raft := range rafts {
+				got += raft.getState()
+				if raft.getState() == LEADER {
+					whoisleader = i
+				}
+			}
+			return got == want && whoisleader == 1
+		}))
 	}
 }
 

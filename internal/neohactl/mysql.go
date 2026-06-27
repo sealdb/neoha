@@ -200,6 +200,9 @@ func getLocalTrxCount(self string, bestone string) (int, error) {
 	if err != nil {
 		return -1, fmt.Errorf("get.gtid.subtract.from.self[%v].failed[%v]", self, err)
 	}
+	if rsp2.RetCode != model.OK {
+		return -1, fmt.Errorf("get.gtid.subtract.from.self[%v].failed[%v]", self, rsp2.RetCode)
+	}
 	subtract := rsp2.Subtract
 
 	// compute the number of local transactions
