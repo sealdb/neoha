@@ -221,8 +221,20 @@ func (b *MySQL80) Ready(ctx context.Context, node *Node) error {
 				return nil
 			}
 		}
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(readyPollInterval)
 	}
+}
+
+func (b *MySQL80) NodeDatadirReady(node *Node) bool {
+	if node.DataDir == "" {
+		node.DataDir = filepath.Join(node.WorkDir, "data")
+	}
+	_, err := os.Stat(filepath.Join(node.DataDir, "mysql", "ibdata1"))
+	if err == nil {
+		return true
+	}
+	entries, err := os.ReadDir(node.DataDir)
+	return err == nil && len(entries) > 0
 }
 
 // TailLog returns the last n bytes of a node's mysqld log (for diagnostics).

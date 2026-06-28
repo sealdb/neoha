@@ -71,6 +71,15 @@ func (d *Driver) Promotable(ctx context.Context) (bool, string) {
 		return false, err.Error()
 	}
 	if inRecovery {
+		if d.conf.MaximumLagOnFailover > 0 {
+			lag, err := d.pg.ReplicationLagBytes(ctx)
+			if err != nil {
+				return false, err.Error()
+			}
+			if lag > d.conf.MaximumLagOnFailover {
+				return false, "postgresql.lag.too.high"
+			}
+		}
 		return true, ""
 	}
 	if d.pg.isWritable() {
@@ -79,8 +88,11 @@ func (d *Driver) Promotable(ctx context.Context) (bool, string) {
 	return false, "postgresql.already.primary.readonly"
 }
 
-func (d *Driver) ReplicationLagBytes(context.Context) (int64, error) {
-	return 0, dbdriver.ErrNotImplemented
+func (d *Driver) ReplicationLagBytes(ctx context.Context) (int64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	return d.pg.ReplicationLagBytes(ctx)
 }
 
 func (d *Driver) ApplyPrimary(ctx context.Context) error {
@@ -104,6 +116,11 @@ func (d *Driver) ApplyReplica(ctx context.Context, primary dbdriver.PrimaryRef) 
 	}
 	if primary.Host == "" && primary.MemberID == "" {
 		return fmt.Errorf("postgresql.ApplyReplica: primary endpoint required")
+	}
+	if d.conf.UsePGRewind {
+		if err := d.pg.MaybePgRewind(ctx, primary); err != nil {
+			return err
+		}
 	}
 	if err := d.pg.SetDefaultReadOnly(ctx, true); err != nil {
 		return err

@@ -22,7 +22,7 @@ NEOHA_REGEN_CONFIG_EXAMPLES=1 go test ./internal/config/ -run TestRegenerateExam
 | `examples/neoha-full.yaml` / `.json` | **Full reference** — every supported config key |
 | `examples/mysql/semisync-node1.yaml` / `.json` | Traditional semi-sync replication |
 | `examples/mysql/mgr-mysql80-node1.yaml` / `.json` | MySQL Group Replication (8.0) |
-| `examples/postgresql/` | Reserved for PostgreSQL (not yet supported) |
+| `examples/postgresql/etcd-node1.yaml` | PostgreSQL streaming + `coordination.provider: etcd` |
 
 详细设计见 [docs/config-design.md](../docs/config-design.md)。
 

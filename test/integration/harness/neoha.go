@@ -234,6 +234,48 @@ func (n *NeoHANode) WriteConfig(mysqlBase, defaultsFile, clusterWorkDir, mysqlDa
 	return writeCLIConfigPath(filepath.Dir(n.ConfigPath), n.ConfigPath)
 }
 
+// WriteEtcdPGConfig writes NeoHA config for PostgreSQL + etcd integration tests.
+func (n *NeoHANode) WriteEtcdPGConfig(pgBase, dataDir, etcdEndpoint string, pgPort int) error {
+	if err := os.MkdirAll(n.MetaDir, 0o755); err != nil {
+		return err
+	}
+
+	conf := config.DefaultConfig()
+	conf.Scope = "neoha-pg-it"
+	conf.Name = n.Name
+	conf.Endpoint = n.Endpoint
+	conf.Log.Level = "INFO"
+
+	conf.Coordination.Provider = "etcd"
+	conf.Coordination.Etcd.Host = etcdEndpoint
+	conf.Coordination.Etcd.TTL = 5
+
+	conf.Database.Type = "postgresql"
+	conf.Database.Postgresql.Version = "postgresql14"
+	conf.Database.Postgresql.Listen = fmt.Sprintf("127.0.0.1:%d", pgPort)
+	conf.Database.Postgresql.ConnectAddress = fmt.Sprintf("127.0.0.1:%d", pgPort)
+	conf.Database.Postgresql.DataDir = dataDir
+	conf.Database.Postgresql.BinDir = filepath.Join(pgBase, "bin")
+	conf.Database.Postgresql.UseSlots = true
+	conf.Database.Postgresql.PrimarySlotName = n.Name
+	conf.Database.Postgresql.UsePGRewind = true
+	conf.Database.Postgresql.Auth.Repl.Username = PGReplUser
+	conf.Database.Postgresql.Auth.Repl.Password = PGReplPass
+	conf.Database.Postgresql.Auth.SuperUser.Username = PGSuperUser
+	conf.Database.Postgresql.Auth.SuperUser.Password = PGSuperPass
+	conf.Database.Postgresql.Auth.Rewind.Username = PGSuperUser
+	conf.Database.Postgresql.Auth.Rewind.Password = PGSuperPass
+
+	applyHAIT(conf)
+	conf.HA.PrimaryHooks.OnPrimaryStart = "nop"
+	conf.HA.PrimaryHooks.OnPrimaryStop = "nop"
+
+	if err := config.WriteConfig(n.ConfigPath, conf); err != nil {
+		return err
+	}
+	return writeCLIConfigPath(filepath.Dir(n.ConfigPath), n.ConfigPath)
+}
+
 // writeCLIConfigPath writes config.path for neohactl.
 func writeCLIConfigPath(dir, configFile string) error {
 	return os.WriteFile(filepath.Join(dir, "config.path"), []byte(configFile), 0o644)

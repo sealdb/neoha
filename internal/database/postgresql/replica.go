@@ -21,6 +21,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	dbdriver "github.com/sealdb/neoha/internal/database/driver"
 )
@@ -153,7 +154,32 @@ func (p *Postgresql) ApplyStreamingReplica(ctx context.Context, primary dbdriver
 		return err
 	}
 	if !inRecovery {
-		return fmt.Errorf("postgresql: primary_conninfo updated but instance is not in recovery; restart required")
+		if err := p.restartIntoRecovery(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *Postgresql) restartIntoRecovery(ctx context.Context) error {
+	p.Close()
+	if err := p.pgCtlStop(ctx); err != nil {
+		return err
+	}
+	if err := p.pgCtlStart(ctx); err != nil {
+		return err
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	if err := p.WaitReady(waitCtx); err != nil {
+		return err
+	}
+	inRecovery, err := p.IsInRecovery(ctx)
+	if err != nil {
+		return err
+	}
+	if !inRecovery {
+		return fmt.Errorf("postgresql: instance not in recovery after restart")
 	}
 	return nil
 }

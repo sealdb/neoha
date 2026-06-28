@@ -396,6 +396,10 @@ type PostgresqlConfig struct {
 	UseSlots bool `yaml:"use_slots" json:"use_slots"`
 	// PrimarySlotName is the physical replication slot on the primary for this replica.
 	PrimarySlotName string `yaml:"primary_slot_name" json:"primary_slot_name"`
+	// MaximumLagOnFailover max replay lag in bytes before promote is allowed (0 = no limit).
+	MaximumLagOnFailover int64 `yaml:"maximum_lag_on_failover" json:"maximum_lag_on_failover"`
+	// UsePGRewind runs pg_rewind when rejoining as replica after timeline fork (requires data_dir + bin_dir).
+	UsePGRewind bool `yaml:"use_pg_rewind" json:"use_pg_rewind"`
 }
 
 func DefaultPostgresqlConfig() *PostgresqlConfig {

@@ -59,8 +59,17 @@ func TestValidateEtcdRequiresHosts(t *testing.T) {
 	assert.Contains(t, err.Error(), "etcd")
 }
 
-func TestValidateDefaultConfig(t *testing.T) {
-	assert.NoError(t, DefaultConfig().Validate())
+func TestValidatePostgreSQLInheritsBootstrapDCS(t *testing.T) {
+	conf := DefaultConfig()
+	conf.Database.Type = "postgresql"
+	conf.Database.Postgresql = DefaultPostgresqlConfig()
+	conf.Bootstrap.BootstrapPostgresql.DcsConf.MaximumLagOnFailover = 2048
+	conf.Bootstrap.BootstrapPostgresql.DcsConf.UseSlots = true
+	conf.Coordination.Provider = "etcd"
+	conf.Coordination.Etcd.Host = "127.0.0.1:2379"
+	assert.NoError(t, conf.Validate())
+	assert.Equal(t, int64(2048), conf.Database.Postgresql.MaximumLagOnFailover)
+	assert.True(t, conf.Database.Postgresql.UseSlots)
 }
 
 func TestParseConfigWithCoordinationYAML(t *testing.T) {

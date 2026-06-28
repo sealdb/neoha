@@ -109,6 +109,21 @@ func (c *Config) Validate() error {
 		if c.Database.Postgresql == nil {
 			return errors.New("database.postgresql section is required when database.type is postgresql")
 		}
+		if c.Database.Postgresql.MaximumLagOnFailover == 0 &&
+			c.Bootstrap != nil && c.Bootstrap.BootstrapPostgresql != nil &&
+			c.Bootstrap.BootstrapPostgresql.DcsConf != nil {
+			c.Database.Postgresql.MaximumLagOnFailover = int64(c.Bootstrap.BootstrapPostgresql.DcsConf.MaximumLagOnFailover)
+		}
+		if !c.Database.Postgresql.UseSlots &&
+			c.Bootstrap != nil && c.Bootstrap.BootstrapPostgresql != nil &&
+			c.Bootstrap.BootstrapPostgresql.DcsConf != nil {
+			c.Database.Postgresql.UseSlots = c.Bootstrap.BootstrapPostgresql.DcsConf.UseSlots
+		}
+		if !c.Database.Postgresql.UsePGRewind &&
+			c.Bootstrap != nil && c.Bootstrap.BootstrapPostgresql != nil &&
+			c.Bootstrap.BootstrapPostgresql.DcsConf != nil {
+			c.Database.Postgresql.UsePGRewind = c.Bootstrap.BootstrapPostgresql.DcsConf.UsePGRewind
+		}
 	default:
 		return errors.Errorf("unsupported database.type %q", dbType)
 	}

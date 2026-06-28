@@ -166,9 +166,13 @@ func (s *Server) setupRPC() {
 		s.rpcs.RaftRPC = raftInst.GetRaftRPC()
 		s.rpcs.HARPC = raftInst.GetHARPC()
 	}
-	s.rpcs.MysqldRPC = s.manager.GetMysqld().GetMysqldRPC()
-	s.rpcs.BackupRPC = s.manager.GetMysqld().GetBackupRPC()
-	s.rpcs.MysqlRPC = s.db.GetMysql().GetMysqlRPC()
+	if mysqld := s.manager.GetMysqld(); mysqld != nil {
+		s.rpcs.MysqldRPC = mysqld.GetMysqldRPC()
+		s.rpcs.BackupRPC = mysqld.GetBackupRPC()
+	}
+	if mysql := s.db.GetMysql(); mysql != nil {
+		s.rpcs.MysqlRPC = mysql.GetMysqlRPC()
+	}
 
 	if err := s.rpc.RegisterService(s.rpcs.NodeRPC); err != nil {
 		log.Panic("server.rpc.RegisterService.NodeRPC.error[%+v]", err)
@@ -189,14 +193,20 @@ func (s *Server) setupRPC() {
 			log.Panic("server.rpc.RegisterService.RaftRPC.error[%+v]", err)
 		}
 	}
-	if err := s.rpc.RegisterService(s.rpcs.MysqldRPC); err != nil {
-		log.Panic("server.rpc.RegisterService.MysqldRPC.error[%+v]", err)
+	if s.rpcs.MysqldRPC != nil {
+		if err := s.rpc.RegisterService(s.rpcs.MysqldRPC); err != nil {
+			log.Panic("server.rpc.RegisterService.MysqldRPC.error[%+v]", err)
+		}
 	}
-	if err := s.rpc.RegisterService(s.rpcs.BackupRPC); err != nil {
-		log.Panic("server.rpc.RegisterService.BackupRPC.error[%+v]", err)
+	if s.rpcs.BackupRPC != nil {
+		if err := s.rpc.RegisterService(s.rpcs.BackupRPC); err != nil {
+			log.Panic("server.rpc.RegisterService.BackupRPC.error[%+v]", err)
+		}
 	}
-	if err := s.rpc.RegisterService(s.rpcs.MysqlRPC); err != nil {
-		log.Panic("server.rpc.RegisterService.MysqlRPC.error[%+v]", err)
+	if s.rpcs.MysqlRPC != nil {
+		if err := s.rpc.RegisterService(s.rpcs.MysqlRPC); err != nil {
+			log.Panic("server.rpc.RegisterService.MysqlRPC.error[%+v]", err)
+		}
 	}
 	log.Info("server.RPC.setup.done")
 }

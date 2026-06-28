@@ -56,8 +56,10 @@ func newMySQLCluster(t *testing.T, name string) (*harness.Cluster, *harness.MySQ
 		cluster.AddNode(fmt.Sprintf("node%d", i+1), port, mgrGRPorts[i])
 	}
 
+	start := time.Now()
 	t.Log("setup: init datadirs and my.cnf")
 	assert.NoError(t, cluster.Setup(ctx))
+	t.Logf("timing: init datadirs %s", time.Since(start))
 
 	t.Cleanup(func() {
 		cancel()
@@ -66,8 +68,10 @@ func newMySQLCluster(t *testing.T, name string) (*harness.Cluster, *harness.MySQ
 		_ = cluster.Teardown(stopCtx)
 	})
 
+	start = time.Now()
 	t.Log("setup: start mysqld x3")
 	assert.NoError(t, cluster.StartAll(ctx))
+	t.Logf("timing: mysqld ready %s", time.Since(start))
 	return cluster, backend, ctx, cancel
 }
 

@@ -72,7 +72,7 @@ func (e *Election) Start() {
 			log.Panic("election.raft.start.error")
 		}
 	case ElectionEtcd:
-		e.log.Warning("election.etcd.start.not.implemented[yet]")
+		// Leader election runs in coordination.Coordinator (server.setupHA / server.Start).
 	default:
 		log.Panic("unsupported election type")
 	}
@@ -83,10 +83,18 @@ func (e *Election) Stop() {
 	case ElectionRaft:
 		e.raft.Stop()
 	case ElectionEtcd:
-		e.log.Warning("election.etcd.stop.not.implemented[yet]")
+		// Coordinator Stop is handled by server.Shutdown.
 	default:
 		log.Panic("unsupported election type")
 	}
+}
+
+// Provider returns the active coordination provider name.
+func (e *Election) Provider() string {
+	if e.conf == nil {
+		return ""
+	}
+	return e.conf.EffectiveCoordination().Provider
 }
 
 func (e *Election) GetRaft() *raft.Raft {

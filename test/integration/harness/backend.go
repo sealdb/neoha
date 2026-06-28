@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 const (
@@ -41,6 +42,16 @@ type Backend interface {
 	StopNode(ctx context.Context, node *Node) error
 	Ready(ctx context.Context, node *Node) error
 }
+
+// DatadirChecker optionally reports whether a node's data directory is initialized.
+type DatadirChecker interface {
+	NodeDatadirReady(node *Node) bool
+}
+
+const readyPollInterval = 150 * time.Millisecond
+
+// ReadyPollInterval is the poll interval used by harness readiness loops.
+func ReadyPollInterval() time.Duration { return readyPollInterval }
 
 // Node is one database (+ optional NeoHA agent) in a test cluster.
 type Node struct {
@@ -130,7 +141,14 @@ func (c *Cluster) datadirsReady() bool {
 	if len(c.Nodes) == 0 {
 		return false
 	}
+	checker, ok := c.Backend.(DatadirChecker)
 	for _, node := range c.Nodes {
+		if ok {
+			if !checker.NodeDatadirReady(node) {
+				return false
+			}
+			continue
+		}
 		mysqlDir := filepath.Join(c.WorkDir, node.Name, "data", "mysql")
 		if _, err := os.Stat(mysqlDir); err != nil {
 			return false
@@ -139,14 +157,34 @@ func (c *Cluster) datadirsReady() bool {
 	return true
 }
 
-// StartAll starts every node and waits until ready.
+// StartAll starts every node in parallel and waits until ready.
 func (c *Cluster) StartAll(ctx context.Context) error {
+	type result struct {
+		name string
+		err  error
+	}
+	ch := make(chan result, len(c.Nodes))
+	var wg sync.WaitGroup
 	for _, node := range c.Nodes {
-		if err := node.backend.StartNode(ctx, node); err != nil {
-			return fmt.Errorf("start node %s: %w", node.Name, err)
-		}
-		if err := node.backend.Ready(ctx, node); err != nil {
-			return fmt.Errorf("ready node %s: %w", node.Name, err)
+		wg.Add(1)
+		go func(n *Node) {
+			defer wg.Done()
+			if err := n.backend.StartNode(ctx, n); err != nil {
+				ch <- result{n.Name, fmt.Errorf("start node %s: %w", n.Name, err)}
+				return
+			}
+			if err := n.backend.Ready(ctx, n); err != nil {
+				ch <- result{n.Name, fmt.Errorf("ready node %s: %w", n.Name, err)}
+				return
+			}
+			ch <- result{n.Name, nil}
+		}(node)
+	}
+	wg.Wait()
+	close(ch)
+	for r := range ch {
+		if r.err != nil {
+			return r.err
 		}
 	}
 	return nil
