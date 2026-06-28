@@ -1,72 +1,85 @@
 /*
  * Copyright 2022-2026 The NeoHA Authors.
  *
- * See the AUTHORS file for a list of contributors.
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
-*/
+ */
 
 package database
 
 import (
+	"context"
 	"log"
 
-	"github.com/sealdb/neoha/internal/base/model"
 	"github.com/sealdb/neoha/internal/base/nlog"
 	"github.com/sealdb/neoha/internal/config"
+	dbdriver "github.com/sealdb/neoha/internal/database/driver"
 	"github.com/sealdb/neoha/internal/database/mysql"
 	"github.com/sealdb/neoha/internal/database/postgresql"
 )
 
-type DBType int
+// DBType identifies the database engine (alias of driver.Engine for legacy callers).
+type DBType = dbdriver.Engine
 
 const (
-	MySQL DBType = 1 << iota
-	PostgreSQL
-	Unknown
+	MySQL      = dbdriver.EngineMySQL
+	PostgreSQL = dbdriver.EnginePostgreSQL
+	Unknown    = dbdriver.EngineUnknown
 )
+
+// Driver re-exports the HA database interface.
+type Driver = dbdriver.Driver
 
 type Database struct {
 	dbType DBType
 	log    *nlog.Log
 	conf   *config.DatabaseConfig
+	driver Driver
 	mysql  *mysql.Mysql
 	pg     *postgresql.Postgresql
 }
 
 // NewDatabase creates the new database tuple.
 func NewDatabase(conf *config.DatabaseConfig, dbType DBType, queryTimeout int, log *nlog.Log) *Database {
-	var my *mysql.Mysql = nil
-	var pg *postgresql.Postgresql = nil
+	var my *mysql.Mysql
+	var pg *postgresql.Postgresql
+	var drv Driver
 
 	if dbType == MySQL {
 		my = mysql.NewMysql(conf.Mysql, queryTimeout, log)
+		drv = mysql.NewDriver(my, conf.Mysql, log)
 	} else if dbType == PostgreSQL {
 		pg = postgresql.NewPostgresql(conf.Postgresql, queryTimeout, log)
+		drv = postgresql.NewDriver(pg, conf.Postgresql, log)
 	} else {
 		log.Panic("unsupported database")
 	}
 
-	db := &Database{
+	return &Database{
 		log:    log,
 		conf:   conf,
 		dbType: dbType,
+		driver: drv,
 		mysql:  my,
 		pg:     pg,
 	}
-	return db
 }
 
+// Driver returns the HA database facade (preferred for new code).
+func (d *Database) Driver() Driver {
+	return d.driver
+}
+
+// GetMysql returns the MySQL handle. Deprecated: use Driver(); retained for raft/RPC migration.
 func (d *Database) GetMysql() *mysql.Mysql {
 	return d.mysql
 }
@@ -79,96 +92,22 @@ func (d *Database) GetPostgreSQL() *postgresql.Postgresql {
 func (d *Database) SetupDB() {
 	switch d.dbType {
 	case MySQL:
-		d.setupMysql()
+		if err := d.driver.SetupBootstrap(context.Background()); err != nil {
+			d.log.Error("database.setup.error[%v]", err)
+		}
 	case PostgreSQL:
-		d.setupPostgresql()
+		if err := d.driver.SetupBootstrap(context.Background()); err != nil {
+			d.log.Error("database.setup.error[%v]", err)
+		}
 	default:
 		log.Panic("unsupported database type")
 	}
-}
-
-// setupMysql waits for mysqld, prepares the replication user on this node (Semi-Sync / MGR),
-// sets read-only, then starts replication.
-func (d *Database) setupMysql() {
-	log := d.log
-	log.Info("database.mysql.wait.for.work[maxwait:60s]")
-	if err := d.mysql.WaitMysqlWorks(60 * 1000); err != nil {
-		log.Error("database.mysql.WaitMysqlWorks.error[%v]", err)
-		return
-	}
-
-	gtid, _ := d.mysql.GetGTID()
-	log.Info("database.mysql.gtid:%+v", gtid)
-
-	if err := d.ensureReplUser(); err != nil {
-		return
-	}
-
-	log.Info("database.mysql.set.to.READONLY")
-	if err := d.mysql.SetReadOnly(); err != nil {
-		log.Error("database.mysql.SetReadOnly.error[%+v]", err)
-		return
-	}
-
-	if d.conf.Mysql.ReplMode != model.ReplModeMGR {
-		d.setupMysqlSemiSync()
-	}
-	// MGR bootstrap/join is driven by Raft (prepareSettingsMGR / follower heartbeat).
-	log.Info("server.mysql.setup.done")
-}
-
-// ensureReplUser creates the configured replication account with sql_log_bin=0 on every NeoHA node
-// before change master / MGR recovery needs it (avoids local GTIDs on joiners).
-func (d *Database) ensureReplUser() error {
-	log := d.log
-	log.Info("database.mysql.check.replication.user...")
-	ret, err := d.mysql.CheckUserExists(d.conf.Mysql.ReplUser, "%")
-	if err != nil {
-		log.Error("database.mysql.CheckUserExists.error[%+v]", err)
-		return err
-	}
-	if !ret {
-		log.Info("setupMysql.database.mysql.prepare.to.create.replication.user[%v]", d.conf.Mysql.ReplUser)
-		user := d.conf.Mysql.ReplUser
-		pwd := d.conf.Mysql.ReplPasswd
-		if err = d.mysql.CreateReplUserWithoutBinlog(user, pwd); err != nil {
-			log.Error("server.mysql.create.replication.user[%v, %v].error[%+v]", user, pwd, err)
-			return err
-		}
-	}
-	return nil
-}
-
-func (d *Database) setupMysqlSemiSync() {
-	log := d.log
-	log.Info("database.mysql.start.slave")
-	if err := d.mysql.StartSlave(); err != nil {
-		log.Error("database.mysql.start.slave.error[%+v]", err)
-	}
-}
-
-func (d *Database) setupPostgresql() {
-
 }
 
 func (d *Database) Start() {
-	switch d.dbType {
-	case MySQL:
-		d.mysql.PingStart()
-	case PostgreSQL:
-		// TODO: start PostgreSQL ping
-	default:
-		log.Panic("unsupported database type")
-	}
+	d.driver.Start()
 }
 
 func (d *Database) Stop() {
-	switch d.dbType {
-	case MySQL:
-		d.mysql.PingStop()
-	case PostgreSQL:
-		// TODO: stop PostgreSQL ping
-	default:
-		log.Panic("unsupported database type")
-	}
+	d.driver.Stop()
 }

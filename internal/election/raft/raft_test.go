@@ -321,17 +321,22 @@ func testRaftLeaderLocalCommit(t *testing.T, replMode model.MysqlReplMode) {
 	//    remock leader to localcommit
 
 	{
+		imoldleader := whoisleader
 		leader.Stop()
 
-		MockWaitLeaderEggs(rafts, 1, replMode, false, -1)
-		got = 0
-		want = (LEADER + FOLLOWER + STOPPED)
-		for _, raft := range rafts {
-			got += raft.getState()
+		if replMode == model.ReplModeMGR {
+			MockResetMGRHandlers(rafts)
 		}
+		MockWaitLeaderEggs(rafts, 1, replMode, false, imoldleader)
 
-		// [LEADER, FOLLOWER, STOPPED]
-		assert.Equal(t, want, got)
+		want = (LEADER + FOLLOWER + STOPPED)
+		assert.True(t, MockWaitUntil(15*time.Second, 50*time.Millisecond, func() bool {
+			got = 0
+			for _, raft := range rafts {
+				got += raft.getState()
+			}
+			return got == want
+		}), "expected [LEADER, FOLLOWER, STOPPED] after old leader stopped, got %v", got)
 
 		got = 0
 		if replMode == model.ReplModeSemiSync {
@@ -341,19 +346,26 @@ func testRaftLeaderLocalCommit(t *testing.T, replMode model.MysqlReplMode) {
 		}
 		leader.Start()
 
-		MockWaitHeartBeatTimeout()
-		// TODO: mgr has local commit ?
 		if replMode == model.ReplModeSemiSync {
 			want = (LEADER + FOLLOWER + INVALID)
+			MockWaitHeartBeatTimeout()
+			for _, raft := range rafts {
+				got += raft.getState()
+			}
+			// [LEADER, FOLLOWER, INVALID]
+			assert.Equal(t, want, got)
 		} else {
 			want = (LEADER + FOLLOWER + FOLLOWER)
+			MockResetMGRHandlers(rafts)
+			MockWaitLeaderEggs(rafts, 1, replMode, true, -1)
+			assert.True(t, MockWaitUntil(15*time.Second, 50*time.Millisecond, func() bool {
+				got = 0
+				for _, raft := range rafts {
+					got += raft.getState()
+				}
+				return got == want
+			}), "expected [LEADER, FOLLOWER, FOLLOWER] after local-commit node rejoined, got %v", got)
 		}
-		for _, raft := range rafts {
-			got += raft.getState()
-		}
-
-		// [LEADER, FOLLOWER, INVALID]
-		assert.Equal(t, want, got)
 	}
 }
 

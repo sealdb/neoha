@@ -1,34 +1,79 @@
-# NeoHA full configuration reference.
-# Lists every supported key with default or example values (MySQL semi-sync).
-# Copy and edit paths, endpoints, and credentials for production.
+# NeoHA 全量配置参考（MySQL semi-sync 示例值）
+# 复制后请按环境修改路径、地址与凭据。字段说明见 docs/config-design.md
 
+# 逻辑集群名，同 scope 下所有 NeoHA 成员必须一致（类似 Patroni scope）
 scope: neoha
+# 外置 DCS（etcd/consul 等）键前缀；provider=raft 时可保留默认
 namespace: /service/
+# 本节点在集群内的唯一成员名
 name: db1
 
-# NeoHA RPC listen address (ip:port). Empty lets the process choose.
+# NeoHA P2P RPC 监听地址 host:port；Raft 成员标识，必填
 endpoint: 127.0.0.1:8080
-
-# Optional HTTP peer address for REST APIs.
+# HTTP REST / 指标监听地址（可选）；空则不开 REST
 peer-address: :6060
 
 restapi:
+    # 是否启用 HTTP REST API
     enable-apis: false
+    # REST 绑定地址
     listen: 127.0.0.1:8008
+    # 对外公布的 REST 地址（客户端/peer 访问用）
     connect_address: 127.0.0.1:8008
+    # TLS 证书路径；空为明文 HTTP
     certfile: ""
     keyfile: ""
     authentication:
+        # REST Basic 认证用户名；空为不启用
         username: ""
         password: ""
 
 ctl:
+    # neohactl 是否跳过 TLS 校验（仅测试）
     insecure: false
+    # neohactl 客户端证书
     certfile: ""
+    # neohactl 信任的 CA
     cacert: ""
 
+# 【legacy】协调后端配置；新配置请用 coordination（二者会自动互相同步）
 election:
+    # 协调算法：raft | etcd（etcd 尚未实现）
     algorithm: raft
+    raft:
+        # Raft 元数据目录（peers.json、view/epoch 等）
+        meta-datadir: .
+        # Leader 心跳间隔，单位 ms
+        heartbeat-timeout: 1000
+        # 连续多少次心跳未达 quorum 则 Leader 主动降主
+        admit-defeat-hearbeat-count: 10
+        # Follower/Candidate 选举超时基数，单位 ms
+        election-timeout: 3000
+        # Leader 上 purge binlog 周期，单位 ms
+        purge-binlog-interval: 300000
+        # Super-IDLE 模式：特殊哨兵节点，不参与常规 Follower 转换
+        super-idle: false
+        # 【legacy】成为可写 primary 后执行的 shell；请改用 ha.primary_hooks.on_primary_start
+        leader-start-command: nop
+        # 【legacy】失去 primary 可达性时执行的 shell；请改用 ha.primary_hooks.on_primary_stop
+        leader-stop-command: nop
+        # 为 true 时 Leader 不自动 purge binlog
+        purge-binlog-disabled: false
+        # NeoHA 节点间 RPC 超时，单位 ms
+        requesttimeout: 1000
+        # 两节点集群时 Candidate 额外等待时间，单位 ms
+        candidate-wait-for-2nodes: 60000
+    etcd:
+        # 单 etcd 地址（与 hosts 二选一）
+        host: ""
+        # etcd 集群地址列表
+        hosts: []
+        # 是否通过 proxy 发现 etcd
+        use_proxies: false
+
+# 【推荐】L2 协调层配置；provider 与 election.algorithm 等价
+coordination:
+    provider: raft
     raft:
         meta-datadir: .
         heartbeat-timeout: 1000
@@ -46,9 +91,11 @@ election:
         hosts: []
         use_proxies: false
 
+# 仅首次初始化集群时读取；日常 failover 不再使用
 bootstrap:
     postgresql:
         dcs:
+            # Patroni 风格 PG DCS TTL（秒）；PG 路径 TBD
             ttl: 30
             loop_wait: 10
             retry_timeout: 10
@@ -73,8 +120,10 @@ bootstrap:
     mysql: {}
 
 database:
+    # 数据库引擎：mysql | postgresql
     type: mysql
     postgresql:
+        # PG 版本 handler：postgresql14 等（PG Driver 尚未完整实现）
         version: postgresql14
         listen: 127.0.0.1:5432
         connect_address: 127.0.0.1:5432
@@ -94,28 +143,44 @@ database:
                 password: ""
         krbsrvname: postgres
         parameters: {}
+        # 升主前执行的自定义脚本/SQL（PG TBD）
         pre_promote: ""
     mysql:
+        # MySQL 管理员账号（NeoHA 连接实例用）
         admin: root
         passwd: ""
         host: localhost
         port: 3306
+        # mysqld 安装目录
         basedir: /u01/mysql_20221010/
+        # SQL 方言 handler：mysql56 | mysql57 | mysql80
         version: mysql57
+        # my.cnf 路径
         defaults-file: /etc/my3306.cnf
+        # 复制模式：semi-sync | group-replication（MGR）
         replication-mode: semi-sync
+        # 后台 ping MySQL 间隔，单位 ms
         ping-timeout: 1000
+        # 连续 ping 失败多少次视为 MysqlDead 并触发降主
         admit-defeat-ping-count: 2
+        # NeoHA 管理连接池上限（0=默认 2）
         max-open-conns: 2
         max-idle-conns: 2
+        # 为 true 时 Error 1040 也触发自动 failover
         failover-on-too-many-connections: false
+        # 两节点 semi-sync 时 rpl_semi_sync_master_timeout（微秒）
         semi-sync-timeout-for-two-nodes: 10000
+        # 升主后 SET GLOBAL，多条用分号分隔
         master-sysvars: ""
+        # 降主/从库 SET GLOBAL，多条用分号分隔
         slave-sysvars: ""
+        # 为 true 关闭 mysqld 监控 RPC 路径
         monitor-disabled: false
+        # 复制对端看到的 Master_Host（常为 VIP 或 primary IP）
         repl-host: 127.0.0.1
         repl-user: repl
         repl-passwd: repl
+        # 新节点 bootstrap 时的 GTID_PURGED
         repl-gtid-purged: ""
         backup:
             ssh-host: 127.0.0.1
@@ -137,15 +202,34 @@ database:
             defaults-file: /etc/my3306.cnf
 
 watchdog:
+    # 看门狗模式：automatic | off 等
     mode: automatic
     device: /dev/watchdog
+    # 喂狗安全余量（秒）
     safety_margin: 5
 
 tags:
+    # 为 true 时本节点永不升 primary
     nofailover: false
+    # 只读池排除（LB 集成 TBD）
     noloadbalance: false
+    # 优先作为备份克隆源（TBD）
     clonefrom: false
+    # PG 非同步副本；MySQL semi-sync 行为 TBD
     nosync: false
 
+# L3 HA  reconcile 循环（Patroni run_cycle 等价）
+ha:
+    # reconcile  tick 间隔（秒）；0 表示使用内置默认 3s
+    reconcile_interval: 3
+    # 为 true 时 DB 升/降主由 Reconciler+Driver 负责，Raft 不再直接改 MySQL 角色
+    delegate_db_apply: false
+    primary_hooks:
+        # 本节点成为可写 primary 后执行（VIP 绑定、LB 注册、自定义脚本等）；nop=不执行
+        on_primary_start: nop
+        # 本节点停止作为 primary 对外服务时执行（VIP 卸载等）；nop=不执行
+        on_primary_stop: nop
+
 log:
+    # 日志级别：DEBUG | INFO | WARNING | ERROR | PANIC
     level: INFO

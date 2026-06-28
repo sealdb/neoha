@@ -53,6 +53,8 @@ func TestFullExampleCoversAllSections(t *testing.T) {
 	assert.NotNil(t, conf.Election)
 	assert.NotNil(t, conf.Election.Raft)
 	assert.NotNil(t, conf.Election.Etcd)
+	assert.NotNil(t, conf.Coordination)
+	assert.Equal(t, conf.Election.Algo, conf.Coordination.Provider)
 	assert.NotNil(t, conf.Bootstrap)
 	assert.NotNil(t, conf.Bootstrap.BootstrapPostgresql)
 	assert.NotNil(t, conf.Bootstrap.BootstrapPostgresql.DcsConf)
@@ -67,17 +69,34 @@ func TestFullExampleCoversAllSections(t *testing.T) {
 	assert.NotNil(t, conf.Database.Postgresql.Auth)
 	assert.NotNil(t, conf.Watchdog)
 	assert.NotNil(t, conf.Tags)
+	assert.NotNil(t, conf.HA)
+	assert.NotNil(t, conf.HA.PrimaryHooks)
 	assert.NotNil(t, conf.Log)
 }
 
 // TestRegenerateFullExampleJSON refreshes configs/examples/neoha-full.json from YAML.
-// Run: NEOHA_REGEN_CONFIG_EXAMPLES=1 go test ./internal/config/ -run TestRegenerateFullExampleJSON
+// Run: NEOHA_REGEN_CONFIG_EXAMPLES=1 go test ./internal/config/ -run TestRegenerateExampleJSON
 func TestRegenerateFullExampleJSON(t *testing.T) {
+	regenerateExampleJSON(t, filepath.Join("..", "..", "configs", "examples", "neoha-full.yaml"))
+}
+
+func TestRegenerateExampleJSON(t *testing.T) {
 	if os.Getenv("NEOHA_REGEN_CONFIG_EXAMPLES") == "" {
 		t.Skip("set NEOHA_REGEN_CONFIG_EXAMPLES=1 to regenerate")
 	}
-	examples := filepath.Join("..", "..", "configs", "examples")
-	conf, err := LoadConfig(filepath.Join(examples, "neoha-full.yaml"))
+	root := filepath.Join("..", "..", "configs", "examples")
+	regenerateExampleJSON(t, filepath.Join(root, "neoha-full.yaml"))
+	regenerateExampleJSON(t, filepath.Join(root, "mysql", "semisync-node1.yaml"))
+	regenerateExampleJSON(t, filepath.Join(root, "mysql", "mgr-mysql80-node1.yaml"))
+}
+
+func regenerateExampleJSON(t *testing.T, yamlPath string) {
+	t.Helper()
+	if os.Getenv("NEOHA_REGEN_CONFIG_EXAMPLES") == "" {
+		t.Skip("set NEOHA_REGEN_CONFIG_EXAMPLES=1 to regenerate")
+	}
+	conf, err := LoadConfig(yamlPath)
 	assert.NoError(t, err)
-	assert.NoError(t, WriteConfig(filepath.Join(examples, "neoha-full.json"), conf))
+	jsonPath := yamlPath[:len(yamlPath)-len(filepath.Ext(yamlPath))] + ".json"
+	assert.NoError(t, WriteConfig(jsonPath, conf))
 }

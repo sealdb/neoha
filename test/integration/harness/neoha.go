@@ -71,6 +71,11 @@ func applyMGRRaftIT(conf *config.Config) {
 	conf.Election.Raft.AdmitDefeatHtCnt = mgrITAdmitDefeatHtCnt
 }
 
+func applyHAIT(conf *config.Config) {
+	conf.HA.DelegateDBApply = true
+	conf.HA.ReconcileInterval = 1
+}
+
 // BuildNeoHA compiles the neoha daemon to outPath (go build uses the module cache; always invoke it so dependency changes are picked up).
 func BuildNeoHA(ctx context.Context, repoRoot, outPath string) error {
 	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
@@ -133,6 +138,7 @@ func (n *NeoHANode) WritePlainConfig(mysqlBase, defaultsFile, clusterWorkDir, my
 	conf.Database.Mysql.MonitorDisabled = true
 
 	LoadIntegrationSettings().ApplyBackupConfig(conf, n.MySQLPort, mysqlBase, defaultsFile, mysqlDataDir)
+	applyHAIT(conf)
 
 	if err := config.WriteConfig(n.ConfigPath, conf); err != nil {
 		return err
@@ -174,6 +180,7 @@ func (n *NeoHANode) WriteSemiSyncConfig(mysqlBase, defaultsFile, clusterWorkDir,
 	conf.Database.Mysql.SemiSyncTimeoutForTwoNodes = 10000
 
 	LoadIntegrationSettings().ApplyBackupConfig(conf, n.MySQLPort, mysqlBase, defaultsFile, mysqlDataDir)
+	applyHAIT(conf)
 
 	if err := config.WriteConfig(n.ConfigPath, conf); err != nil {
 		return err
@@ -219,6 +226,7 @@ func (n *NeoHANode) WriteConfig(mysqlBase, defaultsFile, clusterWorkDir, mysqlDa
 		mgrGroupName, n.MySQLPort+55)
 
 	LoadIntegrationSettings().ApplyBackupConfig(conf, n.MySQLPort, mysqlBase, defaultsFile, mysqlDataDir)
+	applyHAIT(conf)
 
 	if err := config.WriteConfig(n.ConfigPath, conf); err != nil {
 		return err

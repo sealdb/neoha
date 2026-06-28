@@ -28,7 +28,7 @@ var (
 
 func init() {
 	postgresqlHandlers["postgresql14"] = new(Postgresql14)
-	postgresqlHandlers["postgresql14"] = new(Postgresql15)
+	postgresqlHandlers["postgresql15"] = new(Postgresql15)
 }
 
 func getPostgresqlHandler(name string) PostgresqlHandler {

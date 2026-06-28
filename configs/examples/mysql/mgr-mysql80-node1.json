@@ -41,6 +41,27 @@
 			"use_proxies": false
 		}
 	},
+	"coordination": {
+		"provider": "raft",
+		"raft": {
+			"meta-datadir": "/tmp/neoha-it/mgr/node1/meta",
+			"heartbeat-timeout": 1000,
+			"admit-defeat-hearbeat-count": 10,
+			"election-timeout": 3000,
+			"purge-binlog-interval": 300000,
+			"super-idle": false,
+			"leader-start-command": "nop",
+			"leader-stop-command": "nop",
+			"purge-binlog-disabled": true,
+			"requesttimeout": 1000,
+			"candidate-wait-for-2nodes": 60000
+		},
+		"etcd": {
+			"host": "",
+			"hosts": [],
+			"use_proxies": false
+		}
+	},
 	"bootstrap": {
 		"postgresql": {
 			"dcs": {
@@ -153,6 +174,14 @@
 		"noloadbalance": false,
 		"clonefrom": false,
 		"nosync": false
+	},
+	"ha": {
+		"reconcile_interval": 3,
+		"delegate_db_apply": false,
+		"primary_hooks": {
+			"on_primary_start": "nop",
+			"on_primary_stop": "nop"
+		}
 	},
 	"log": {
 		"level": "INFO"

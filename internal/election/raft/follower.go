@@ -156,8 +156,12 @@ func (r *Follower) processHeartbeatRequest(req *model.RaftRPCRequest) *model.Raf
 		rsp.RetCode = model.ErrorInvalidViewID
 
 	case viewdiff <= 0:
-		if err := r.mysql.SetReadOnly(); err != nil {
-			r.ERROR("mysql.SetReadOnly.error[%v]", err)
+		r.RecordLeaderDatabase(&req.Repl)
+
+		if !r.DelegateDBApply() {
+			if err := r.demoteReadOnly(); err != nil {
+				r.ERROR("mysql.SetReadOnly.error[%v]", err)
+			}
 		}
 
 		applyEpochView := func() {
@@ -190,6 +194,19 @@ func (r *Follower) processHeartbeatRequest(req *model.RaftRPCRequest) *model.Raf
 
 				switch r.cmtState {
 				case CmtNone:
+					if r.DelegateDBApply() {
+						if ok, err := r.mysql.IsMGRRunningOK(); err == nil && ok {
+							r.cmtState = CmtOK
+							r.leader = req.GetFrom()
+							r.mgrClusterEverOK = true
+							r.WARNING("delegated.mgr.join.ok[reconciler]")
+						} else {
+							r.WARNING("delegated.mgr.join.pending[reconciler]")
+						}
+						rsp.Raft.CmtState = r.cmtState.String()
+						applyEpochView()
+						return rsp
+					}
 					lastReq := *req
 					go func() {
 						r.cmtState = CmtChanging
@@ -215,10 +232,23 @@ func (r *Follower) processHeartbeatRequest(req *model.RaftRPCRequest) *model.Raf
 			}
 
 			if r.cmtState != CmtChanging {
+				if r.DelegateDBApply() {
+					if ok, err := r.mysql.IsMGRRunningOK(); err == nil && ok {
+						if r.cmtState != CmtOK {
+							r.cmtState = CmtOK
+							r.mgrClusterEverOK = true
+						}
+					}
+				}
 				if ok, err := r.mysql.IsMGRRunningOK(); err == nil && !ok {
 					r.ERROR("mysql.local.MGR.is.not.running.ok[%v].error[%v]", ok, err)
 					r.leader = ""
 				}
+			}
+		} else if r.DelegateDBApply() {
+			if r.getLeader() != req.GetFrom() {
+				r.leader = req.GetFrom()
+				r.WARNING("delegated.semisync.leader[%v].reconciler.owns.replica.apply", req.GetFrom())
 			}
 		} else {
 			if err := r.mysql.DisableSemiSyncMaster(); err != nil {
@@ -473,7 +503,7 @@ func (r *Follower) setMySQLAsync() {
 	go func() {
 		defer r.wg.Done()
 		// MySQL1: set readonly
-		if err := r.mysql.SetReadOnly(); err != nil {
+		if err := r.demoteReadOnly(); err != nil {
 			r.ERROR("mysql.SetReadOnly.error[%v]", err)
 		}
 		r.WARNING("mysql.SetReadOnly.done")
@@ -497,10 +527,22 @@ func (r *Follower) setMySQLAsync() {
 func (r *Follower) stateInit() {
 	r.WARNING("state.init")
 	r.updateStateBegin()
-	// 1. stop vip
-	if err := r.leaderStopShellCommand(); err != nil {
-		// TODO(array): what todo?
-		r.ERROR("stopShellCommand.error[%v]", err)
+	if r.DelegateDBApply() {
+		if r.mysqlReplMode == model.ReplModeMGR {
+			mgrJoined := false
+			if stat, err := r.mysql.GetLocalMGRStat(); err == nil && stat != nil {
+				mgrJoined = stat.State == model.MGRStateOnline || stat.State == model.MGRStateRecovering
+			}
+			if !mgrJoined {
+				r.WARNING("delegated.follower.stop.MGR.before.reconciler")
+				if err := r.mysql.StopMGR(); err != nil {
+					r.ERROR("stop.MGR.error[%v]", err)
+				}
+			}
+		}
+		r.WARNING("follower.state.init.delegated.skip[mysql setup owned by reconciler]")
+		r.WARNING("state.machine.run")
+		return
 	}
 	if r.mysqlReplMode == model.ReplModeMGR {
 		mgrJoined := false
@@ -520,7 +562,7 @@ func (r *Follower) stateInit() {
 			r.WARNING("stop.MGR.end")
 			r.cmtState = CmtNone
 		}
-		if err := r.mysql.SetReadOnly(); err != nil {
+		if err := r.demoteReadOnly(); err != nil {
 			r.ERROR("mysql.SetReadOnly.error[%v]", err)
 		}
 	} else {

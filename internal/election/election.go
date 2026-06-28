@@ -52,10 +52,10 @@ func NewElection(conf *config.Config, state raft.State, db *database.Database, d
 		dbType: dbType,
 	}
 
-	if conf.Election.Algo == "raft" {
+	if conf.EffectiveCoordination().Provider == "raft" {
 		election.etype = ElectionRaft
 		election.raft = raft.NewRaft(conf, log, db, dbType, state)
-	} else if conf.Election.Algo == "etcd" {
+	} else if conf.EffectiveCoordination().Provider == "etcd" {
 		election.etype = ElectionEtcd
 		// election.etcd = etcd.NewEtcd()
 	} else {
@@ -72,7 +72,7 @@ func (e *Election) Start() {
 			log.Panic("election.raft.start.error")
 		}
 	case ElectionEtcd:
-		// TODO: start etcd
+		e.log.Warning("election.etcd.start.not.implemented[yet]")
 	default:
 		log.Panic("unsupported election type")
 	}
@@ -83,7 +83,7 @@ func (e *Election) Stop() {
 	case ElectionRaft:
 		e.raft.Stop()
 	case ElectionEtcd:
-		// TODO: stop etcd
+		e.log.Warning("election.etcd.stop.not.implemented[yet]")
 	default:
 		log.Panic("unsupported election type")
 	}
