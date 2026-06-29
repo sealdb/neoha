@@ -330,7 +330,14 @@ func (n *NeoHANode) Stop(ctx context.Context) error {
 	}
 	_ = n.cmd.Process.Signal(os.Interrupt)
 	done := make(chan error, 1)
-	go func() { done <- n.cmd.Wait() }()
+	cmd := n.cmd
+	go func() {
+		if cmd != nil {
+			done <- cmd.Wait()
+		} else {
+			done <- nil
+		}
+	}()
 	select {
 	case <-ctx.Done():
 		_ = n.cmd.Process.Kill()

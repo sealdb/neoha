@@ -90,7 +90,7 @@ func WaitNeoHAReadyViaCLI(ctx context.Context, ctlBin string, nodes []*NeoHANode
 		if ready == len(nodes) {
 			return nil
 		}
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(ReadyPollInterval())
 	}
 }
 
