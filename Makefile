@@ -23,6 +23,16 @@ COVERAGE_LOG := coverage.log
 
 .PHONY: build clean install fmt test testbase testconfig testdatabase testmanager testelection testserver testcmd test-integration vet coverage coverage-ci
 
+# Optional test names after test-integration become dummy goals so make does not error.
+# Example: make test-integration TestNeoHASemiSyncWarmSuite,TestNeoHAMGRWarmSuite
+ifneq ($(filter test-integration,$(MAKECMDGOALS)),)
+  IT_RUN_GOALS := $(filter-out test-integration,$(MAKECMDGOALS))
+  ifneq ($(IT_RUN_GOALS),)
+    $(IT_RUN_GOALS):
+	@:
+  endif
+endif
+
 build: LDFLAGS   += $(shell GOPATH=${GOPATH} build/ldflags.sh)
 build:
 	@echo "--> Building..."
@@ -83,9 +93,20 @@ test-integration:
 	@mkdir -p bin
 	@echo "--> Pre-building test binary (avoids silent compile)..."
 	go test -tags=integration -c -o bin/neoha-it.test ./test/integration
+	@run="$(TESTS)"; \
+	if [ -z "$$run" ] && [ -n "$(IT_RUN_GOALS)" ]; then \
+		run=$$(echo "$(IT_RUN_GOALS)" | tr ' ,' '|' | sed -e 's/^|*//' -e 's/|*$$//' -e 's/||*/|/g'); \
+	elif [ -n "$$run" ]; then \
+		run=$$(echo "$$run" | tr ',' '|' | sed -e 's/^|*//' -e 's/|*$$//' -e 's/||*/|/g'); \
+	fi; \
+	args="-test.v -test.timeout=15m -test.count=1"; \
+	if [ -n "$$run" ]; then \
+		echo "--> Filter: -test.run $$run"; \
+		args="$$args -test.run $$run"; \
+	fi; \
 	NEOHA_IT_MYSQL_BASE=$${NEOHA_IT_MYSQL_BASE:-/home/wslu/work/mysql/mysql80-debug} \
 	NEOHA_IT_XTRABACKUP_BINDIR=$${NEOHA_IT_XTRABACKUP_BINDIR:-/home/wslu/work/mysql/xtrabackup-8.0.35} \
-		bin/neoha-it.test -test.v -test.timeout=15m -test.count=1
+		bin/neoha-it.test $$args
 
 PKGS =	./internal/base/common/... \
 	./internal/base/nlog/... \

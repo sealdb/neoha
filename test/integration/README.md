@@ -56,11 +56,31 @@ cp test/integration/it.local.yaml.example test/integration/it.local.yaml
 cp test/integration/it.local.yaml.example test/integration/it.local.yaml
 # Edit mysql-base, xtrabackup-bindir, ssh-port (WSL often 2222), ssh-user if needed
 
-# 2. Full integration suite (~3–5 min after datadirs exist)
+# 2. Full integration suite (~6–8 min after datadirs exist; global timeout 15m)
 make test-integration
+
+# One or more tests (comma- or space-separated names match go test -run regex)
+make test-integration TestNeoHASemiSyncWarmSuite
+make test-integration TestNeoHASemiSyncWarmSuite,TestNeoHAMGRWarmSuite
+make test-integration TestNeoHAMGRWarmSuite TestNeoHAMGRFailoverMajorityLoss
+
+# Same via TESTS= (useful in scripts)
+make test-integration TESTS=TestNeoHASemiSyncWarmSuite,TestNeoHAMGRWarmSuite
+
+# Subtest (regex)
+make test-integration 'TestNeoHAMGRFailoverMajorityLoss/RejoinThenWritable'
 ```
 
-`make test-integration` pre-builds `bin/neoha-it.test`, then runs all tests with a 10-minute timeout. It passes through `NEOHA_IT_MYSQL_BASE` and `NEOHA_IT_XTRABACKUP_BINDIR` when set; otherwise it uses the defaults shown in the Makefile.
+`make test-integration` pre-builds `bin/neoha-it.test`, then runs all tests with a **15-minute** global timeout (`-test.timeout=15m`). It passes through `NEOHA_IT_MYSQL_BASE` and `NEOHA_IT_XTRABACKUP_BINDIR` when set; otherwise it uses the defaults shown in the Makefile.
+
+Pre-build `neoha` / `neohactl` to avoid implicit compile during IT:
+
+```bash
+go build -o bin/neoha ./cmd/neoha
+go build -o bin/neohactl ./cmd/neohactl
+export NEOHA_IT_BIN=$PWD/bin/neoha NEOHA_IT_CTL_BIN=$PWD/bin/neohactl
+make test-integration
+```
 
 ### Environment variables
 
@@ -87,17 +107,20 @@ make test-integration
 Build tag **`integration`** is required.
 
 ```bash
-# All integration tests
-go test -tags=integration -v -timeout=10m -count=1 ./test/integration
+# All integration tests (match Makefile global timeout)
+go test -tags=integration -v -timeout=15m -count=1 ./test/integration
 
-# MGR cluster formation
-go test -tags=integration -v -timeout=5m -count=1 -run TestNeoHA3NodeMGR ./test/integration
+# MGR warm cluster (formation + minority failover subtests)
+go test -tags=integration -v -timeout=15m -count=1 -run TestNeoHAMGRWarmSuite ./test/integration
 
-# Semi-sync cluster
-go test -tags=integration -v -timeout=5m -count=1 -run TestNeoHA3NodeSemiSync ./test/integration
+# MGR majority loss (sole survivor + rejoin)
+go test -tags=integration -v -timeout=15m -count=1 -run TestNeoHAMGRFailoverMajorityLoss ./test/integration
+
+# Semi-sync warm cluster
+go test -tags=integration -v -timeout=15m -count=1 -run TestNeoHASemiSyncWarmSuite ./test/integration
 
 # Xtrabackup rebuildme (requires SSH + xtrabackup; see below)
-go test -tags=integration -v -timeout=10m -count=1 -run TestNeoHAXtrabackupRebuildMe ./test/integration
+go test -tags=integration -v -timeout=15m -count=1 -run TestNeoHAXtrabackupRebuildMe ./test/integration
 ```
 
 Pre-compile to avoid a long silent compile phase:
@@ -105,7 +128,8 @@ Pre-compile to avoid a long silent compile phase:
 ```bash
 go test -tags=integration -c -o bin/neoha-it.test ./test/integration
 NEOHA_IT_MYSQL_BASE=... NEOHA_IT_XTRABACKUP_BINDIR=... \
-  bin/neoha-it.test -test.v -test.timeout=10m -test.count=1
+  NEOHA_IT_BIN=$PWD/bin/neoha NEOHA_IT_CTL_BIN=$PWD/bin/neohactl \
+  bin/neoha-it.test -test.v -test.timeout=15m -test.count=1
 ```
 
 ### Xtrabackup / `rebuildme` test
@@ -139,19 +163,21 @@ ssh -p 2222 -o BatchMode=yes $(whoami)@127.0.0.1 echo ok
 Run only the rebuildme test:
 
 ```bash
-go test -tags=integration -v -timeout=10m -count=1 \
+go test -tags=integration -v -timeout=15m -count=1 \
   -run TestNeoHAXtrabackupRebuildMe ./test/integration
 ```
 
 ### Ports used by tests
 
-| Scenario | MySQL ports | NeoHA Raft ports |
-|----------|-------------|------------------|
-| MGR scaffold / NeoHA MGR | 13306–13308 | 18081–18103 (per test) |
-| Semi-sync | 13316–13318 | 18111–18123 |
-| Xtrabackup rebuildme | 13326–13327 | 18131–18132 |
+| Scenario | MySQL ports | GR ports | NeoHA Raft ports |
+|----------|-------------|----------|------------------|
+| MGR warm (`TestNeoHAMGRWarmSuite`) | 13306–13308 | 13361–13363 | 18081–18083 |
+| MGR majority loss (`TestNeoHAMGRFailoverMajorityLoss`) | 13326–13328 | 13381–13383 | 18101–18103 |
+| Semi-sync warm | 13316–13318 | — | 18111–18113 |
+| Xtrabackup rebuildme | 13326–13327 | — | 18131–18132 |
+| PostgreSQL | 15432–15433 | — | etcd / agent per test |
 
-If a run aborts mid-test, free ports or use a fresh `NEOHA_IT_WORKDIR`.
+Majority-loss and xtrabackup both use MySQL `13326–13327`; tests run sequentially and tear down workdirs between suites. If a run aborts mid-test, free ports or use a fresh `NEOHA_IT_WORKDIR`.
 
 ### First run vs later runs
 
@@ -171,12 +197,15 @@ pkill -f 'defaults-file=/tmp/neoha-it' || true
 | Test | What it verifies |
 |------|------------------|
 | `TestMySQL3NodeScaffold` | 3 mysqld instances start with MGR plugin loaded |
-| `TestNeoHA3NodeMGR` | 3 NeoHA agents → Raft leader → MGR 3 ONLINE via `setupMysql` |
-| `TestNeoHAMGRFailoverMinority` | MGR primary loss + Raft leader survives |
-| `TestNeoHAMGRFailoverMajorityLoss` | MGR quorum lost; NeoHA Raft bootstrap on sole survivor |
-| `TestNeoHA3NodeSemiSync` | 3 NeoHA agents → Raft leader → semi-sync replicas running |
-| `TestNeoHASemiSyncFailoverMinority` | Primary mysqld loss → Raft re-elects → replication re-wired |
-| `TestNeoHAXtrabackupRebuildMe` | 2-node semi-sync: `neohactl mysql rebuildme --from=<leader> --force` (xtrabackup stream, apply-log, re-slave) |
+| `TestNeoHAMGRWarmSuite` | Warm 3-node MGR: formation + minority failover (failover subtest times only the fault segment) |
+| `TestNeoHAMGRFailoverMajorityLoss` | 2 mysqld down: sole-survivor read-only PRIMARY, then rejoin → 2+ ONLINE → writable |
+| `TestPostgreSQLApplyReplicaPgRewind` | `ApplyReplica` with `pg_rewind` after promote |
+| `TestPostgreSQL2NodeScaffold` | 2-node PG primary + streaming standby |
+| `TestNeoHAPGEtcdFailoverMinority` | PG + etcd DCS: minority failover promote |
+| `TestNeoHASemiSyncWarmSuite` | Warm 3-node semi-sync: formation + minority failover |
+| `TestNeoHAXtrabackupRebuildMe` | 2-node semi-sync: `neohactl mysql rebuildme --from=<leader> --force` |
+
+MGR / semi-sync warm suites pre-write `peers.json` and skip `neohactl raft enable` + `cluster add` (production CLI wire is still covered by the xtrabackup test).
 
 ## Repository layout
 
@@ -203,10 +232,13 @@ test/integration/
 │   mysql_assert.go  # Read-only MGR assertions
 │   neoha.go         # NeoHA config + process lifecycle
 │   neorpc.go        # neorpc helpers (neohactl-equivalent)
+├── mysql_warm_test.go   # warm fixture helpers (MGR / semi-sync)
 ├── mgr_3node_test.go
 ├── mgr_neoha_test.go
 ├── semisync_neoha_test.go
 ├── xtrabackup_neoha_test.go
+├── postgresql_apply_replica_test.go
+├── postgresql_etcd_neoha_test.go
 ├── it.local.yaml.example
 └── README.md
 ```
@@ -230,7 +262,7 @@ pkill -f 'defaults-file=/tmp/neoha-it' || true
 rm -rf "${NEOHA_IT_WORKDIR:-/tmp/neoha-it}/<cluster-name>"
 ```
 
-Common ports: MGR `13306–13308`, semi-sync `13316–13318`, xtrabackup `13326–13327`.
+Common ports: MGR warm `13306–13308`, MGR majority-loss `13326–13328`, semi-sync `13316–13318`, xtrabackup `13326–13327`.
 
 ### Xtrabackup test hangs on `rebuildme`
 

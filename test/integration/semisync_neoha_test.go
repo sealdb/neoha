@@ -70,21 +70,39 @@ func TestNeoHASemiSyncWarmSuite(t *testing.T) {
 		remain := survivors(warm.cluster.Nodes, primary)
 		remainEP := harness.EndpointsForClusterNodes(warm.neoNodes, warm.cluster, remain)
 		assert.Len(t, remainEP, 2)
+		oldLeaderEP := harness.EndpointsForClusterNodes(warm.neoNodes, warm.cluster, []*harness.Node{primary})
+		if !assert.Len(t, oldLeaderEP, 1) {
+			return
+		}
 
-		leaderCtx, leaderCancel := context.WithTimeout(context.Background(), 45*time.Second)
-		defer leaderCancel()
+		failoverCtx, failoverCancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer failoverCancel()
+		t.Log("failover: wait old Raft LEADER to step down")
+		if !assert.NoError(t, harness.WaitRaftNotState(failoverCtx, oldLeaderEP[0], "LEADER")) {
+			return
+		}
+
 		t.Log("failover: wait NeoHA Raft LEADER on survivors")
-		newLeaderEP, err := harness.WaitRaftLeader(leaderCtx, remainEP)
-		assert.NoError(t, err)
+		newLeaderEP, err := harness.WaitRaftLeader(failoverCtx, remainEP)
+		if !assert.NoError(t, err) {
+			for _, na := range warm.neoNodes {
+				t.Logf("neoha log %s:\n%s", na.Name, na.TailNeoHALog(8000))
+			}
+			return
+		}
 
 		newPrimary := mysqlNodeForNeoHA(warm.cluster, warm.neoNodes, newLeaderEP)
-		assert.NotNil(t, newPrimary)
+		if !assert.NotNil(t, newPrimary) {
+			return
+		}
 		assert.NotEqual(t, primary.Name, newPrimary.Name)
-		assert.NoError(t, warm.backend.WaitMySQLWritable(leaderCtx, newPrimary))
+		assert.NoError(t, warm.backend.WaitMySQLWritable(failoverCtx, newPrimary))
 
 		other := survivors(remain, newPrimary)
-		assert.Len(t, other, 1)
-		assert.NoError(t, warm.backend.WaitReplicaConnectedTo(leaderCtx, other[0], newPrimary.Port))
+		if !assert.Len(t, other, 1) {
+			return
+		}
+		assert.NoError(t, warm.backend.WaitReplicaConnectedTo(failoverCtx, other[0], newPrimary.Port))
 		t.Logf("timing: failover segment %s (old=%s new=%s)", time.Since(start), primary.Name, newPrimary.Name)
 	})
 }

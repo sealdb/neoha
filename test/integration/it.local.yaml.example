@@ -9,7 +9,7 @@
 #   make test-integration
 #
 # Run xtrabackup rebuildme test only:
-#   go test -tags=integration -v -timeout=10m -count=1 \
+#   go test -tags=integration -v -timeout=15m -count=1 \
 #     -run TestNeoHAXtrabackupRebuildMe ./test/integration
 #
 # See test/integration/README.md for ports, SSH, and troubleshooting.
