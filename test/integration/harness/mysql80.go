@@ -108,6 +108,10 @@ default_authentication_plugin=mysql_native_password
 plugin_load_add='semisync_master.so;semisync_slave.so'
 `, b.BaseDir, b.BaseDir, node.DataDir, node.Port, node.Socket, node.DataDir, node.DataDir, node.Port, node.Port)
 	default:
+		grSeeds := node.GRSeeds
+		if grSeeds == "" {
+			grSeeds = "127.0.0.1:13361,127.0.0.1:13362,127.0.0.1:13363"
+		}
 		cnf = fmt.Sprintf(`[mysqld]
 basedir=%s
 plugin_dir=%s/lib/plugin
@@ -133,12 +137,12 @@ report_port=%d
 loose-group_replication_group_name="%s"
 loose-group_replication_start_on_boot=OFF
 loose-group_replication_local_address="127.0.0.1:%d"
-loose-group_replication_group_seeds="127.0.0.1:13361,127.0.0.1:13362,127.0.0.1:13363"
+loose-group_replication_group_seeds="%s"
 loose-group_replication_bootstrap_group=OFF
 loose-group_replication_single_primary_mode=ON
 loose-group_replication_recovery_get_public_key=ON
 plugin_load_add='group_replication.so'
-`, b.BaseDir, b.BaseDir, node.DataDir, node.Port, node.Socket, node.DataDir, node.DataDir, node.Port, node.Port, mgrGroupName, node.GRPort)
+`, b.BaseDir, b.BaseDir, node.DataDir, node.Port, node.Socket, node.DataDir, node.DataDir, node.Port, node.Port, mgrGroupName, node.GRPort, grSeeds)
 	}
 
 	if err := os.WriteFile(node.Config, []byte(cnf), 0o644); err != nil {
@@ -163,7 +167,11 @@ plugin_load_add='group_replication.so'
 }
 
 func (b *MySQL80) StartNode(ctx context.Context, node *Node) error {
-	cmd := exec.CommandContext(ctx, b.mysqld(), "--defaults-file="+node.Config)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// Do not use CommandContext: cancelling the caller's ctx must not stop mysqld.
+	cmd := exec.Command(b.mysqld(), "--defaults-file="+node.Config)
 	logPath := filepath.Join(node.WorkDir, "mysqld.log")
 	logFile, err := os.Create(logPath)
 	if err != nil {

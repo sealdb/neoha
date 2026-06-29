@@ -377,15 +377,72 @@ func (my *MysqlBase) ChangeMasterTo(db *sql.DB, master *model.Repl) error {
 	return ExecuteSuperQueryListWithTimeout(db, my.queryTimeout, cmds)
 }
 
+// countMGRLiveMembers counts ONLINE/RECOVERING members in the group view.
+func (my *MysqlBase) countMGRLiveMembers(db *sql.DB) int {
+	live, _, _ := my.mgrGroupView(db)
+	return live
+}
+
+func (my *MysqlBase) mgrGroupView(db *sql.DB) (live int, total int, err error) {
+	rows, err := my.GetMGRStats(db)
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, row := range rows {
+		total++
+		state := row["MEMBER_STATE"]
+		if state == model.MGRStateOnline || state == model.MGRStateRecovering {
+			live++
+		}
+	}
+	return live, total, nil
+}
+
+func (my *MysqlBase) groupReplicationLocalAddress(db *sql.DB) (string, error) {
+	query := "SELECT @@GLOBAL.group_replication_local_address"
+	rows, err := QueryWithTimeout(db, my.queryTimeout, query)
+	if err != nil {
+		return "", err
+	}
+	if len(rows) == 0 {
+		return "", errors.New("group_replication_local_address.not.found")
+	}
+	return rows[0]["@@GLOBAL.group_replication_local_address"], nil
+}
+
 // ChangeToMaster changes a slave to be master.
 func (my *MysqlBase) ChangeToMaster(db *sql.DB, master *model.Repl) error {
 	cmds := []string{}
 	if my.replMode == model.ReplModeMGR {
+		// Sole-survivor rebuild: force the group view only when this node is the
+		// last live member of an existing group. Fresh clusters (empty view) use
+		// normal bootstrap without force_members.
+		live, total, err := my.mgrGroupView(db)
+		if err != nil {
+			return err
+		}
+		useForce := live == 1 && total >= 1
+		var forceAddr string
+		if useForce {
+			addr, err := my.groupReplicationLocalAddress(db)
+			if err != nil {
+				return err
+			}
+			forceAddr = addr
+			// force_members requires the member to still be ONLINE.
+			cmds = append(cmds, fmt.Sprintf("SET GLOBAL group_replication_force_members = '%s'", forceAddr))
+		}
+
 		cmds = append(cmds, "STOP GROUP_REPLICATION")
 		cmds = append(cmds, my.MGRChangeMasterToCommands(master)...)
-		cmds = append(cmds, "SET GLOBAL group_replication_bootstrap_group=ON")
-		cmds = append(cmds, "START GROUP_REPLICATION") //TODO: too slow
-		cmds = append(cmds, "SET GLOBAL group_replication_bootstrap_group=OFF")
+		cmds = append(cmds,
+			"SET GLOBAL group_replication_bootstrap_group=ON",
+			"START GROUP_REPLICATION", //TODO: too slow
+			"SET GLOBAL group_replication_bootstrap_group=OFF",
+		)
+		if forceAddr != "" {
+			cmds = append(cmds, "SET GLOBAL group_replication_force_members = ''")
+		}
 	} else {
 		cmds = append(cmds, "STOP SLAVE")
 		cmds = append(cmds, "RESET SLAVE ALL") //"ALL" makes it forget the master host:port

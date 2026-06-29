@@ -50,9 +50,14 @@ type warmNeoHACluster struct {
 	endpoints []string
 }
 
-func newWarmMySQLCluster(t *testing.T, name string, mysqlPorts []int, grPorts []int, semiSync bool) warmMySQLCluster {
+func newWarmMySQLCluster(t *testing.T, name string, mysqlPorts []int, grPorts []int, semiSync bool, resetDatadir bool) warmMySQLCluster {
 	t.Helper()
-	if err := harness.EnsurePortsFree(mysqlPorts); err != nil {
+	allPorts := append(append([]int{}, mysqlPorts...), grPorts...)
+	if resetDatadir {
+		if err := harness.FreePorts(allPorts); err != nil {
+			t.Fatalf("free ports before reset: %v", err)
+		}
+	} else if err := harness.EnsurePortsFree(mysqlPorts); err != nil {
 		t.Fatalf("port check: %v", err)
 	}
 
@@ -72,8 +77,13 @@ func newWarmMySQLCluster(t *testing.T, name string, mysqlPorts []int, grPorts []
 	}
 
 	start := time.Now()
-	t.Log("warm: init datadirs and my.cnf (reuse when ready)")
-	assert.NoError(t, cluster.Setup(ctx))
+	if resetDatadir {
+		t.Log("warm: reset datadirs and my.cnf (force clean)")
+		assert.NoError(t, cluster.SetupReset(ctx))
+	} else {
+		t.Log("warm: init datadirs and my.cnf (reuse when ready)")
+		assert.NoError(t, cluster.Setup(ctx))
+	}
 	t.Logf("timing: init datadirs %s", time.Since(start))
 
 	t.Cleanup(func() {
@@ -118,8 +128,26 @@ func bootstrapWarmNeoHA(
 func waitMGRFormation(t *testing.T, warm warmNeoHACluster) {
 	t.Helper()
 	start := time.Now()
+	leaderEP, err := harness.WaitRaftLeader(warm.ctx, warm.endpoints)
+	if err != nil {
+		t.Fatalf("warm: raft leader: %v", err)
+	}
+	primary := mysqlNodeForNeoHA(warm.cluster, warm.neoNodes, leaderEP)
+	if primary == nil {
+		t.Fatalf("warm: no mysql node for raft leader %s", leaderEP)
+	}
+	t.Logf("warm: raft leader %s (mysql %s)", leaderEP, primary.Name)
+
 	t.Log("warm: wait MGR 3 ONLINE")
-	assert.NoError(t, warm.backend.WaitMGROnlineMembers(warm.ctx, warm.cluster.Nodes[0], 3))
+	formCtx, cancel := context.WithTimeout(warm.ctx, 5*time.Minute)
+	defer cancel()
+	if err := warm.backend.WaitMGROnlineMembers(formCtx, primary, 3); err != nil {
+		cnt, _ := warm.backend.OnlineMGRMembers(primary)
+		for _, na := range warm.neoNodes {
+			t.Logf("neoha log %s:\n%s", na.Name, na.TailNeoHALog(8000))
+		}
+		t.Fatalf("warm: MGR 3 online (have %d): %v", cnt, err)
+	}
 	t.Logf("timing: MGR 3 online %s", time.Since(start))
 }
 

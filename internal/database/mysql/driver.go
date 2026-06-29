@@ -1,6 +1,8 @@
 /*
  * Copyright 2022-2026 The NeoHA Authors.
  *
+ * See the AUTHORS file for a list of contributors.
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -147,11 +149,16 @@ func (d *Driver) applyPrimaryMGR(ctx context.Context) error {
 	if err := d.m.WaitApplyRelayLog(15, 2); err != nil {
 		return err
 	}
-	if err := d.m.SetMasterGlobalSysVar(); err != nil {
-		return err
-	}
 	if d.mgrAlreadyPrimary() {
 		return d.m.SetReadOnly()
+	}
+	// group_replication_group_name cannot change while GR is running; sole-survivor
+	// rebuild keeps the existing group name and uses force_members in ChangeToMaster.
+	running, _ := d.m.IsMGRRunningOK()
+	if !running {
+		if err := d.m.SetMasterGlobalSysVar(); err != nil {
+			return err
+		}
 	}
 	repl := d.replFromConf()
 	if err := d.m.ChangeToMaster(repl); err != nil {
@@ -214,6 +221,28 @@ func (d *Driver) MGRClusterWritableReady(ctx context.Context) (bool, error) {
 
 func (d *Driver) ApplyPrimaryMGRPhase2(ctx context.Context) error {
 	return d.EnableReadWrite(ctx)
+}
+
+func (d *Driver) MGRReplicaJoined(ctx context.Context) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if !d.IsMGRMode() {
+		return false, nil
+	}
+	status, err := d.m.GetLocalMGRStat()
+	if err != nil {
+		return false, err
+	}
+	if status.Role != model.MGRRoleSecondary {
+		return false, nil
+	}
+	switch status.State {
+	case model.MGRStateOnline, model.MGRStateRecovering:
+		return true, nil
+	default:
+		return false, nil
+	}
 }
 
 var _ dbdriver.MGRLifecycle = (*Driver)(nil)

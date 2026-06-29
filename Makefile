@@ -85,7 +85,7 @@ test-integration:
 	go test -tags=integration -c -o bin/neoha-it.test ./test/integration
 	NEOHA_IT_MYSQL_BASE=$${NEOHA_IT_MYSQL_BASE:-/home/wslu/work/mysql/mysql80-debug} \
 	NEOHA_IT_XTRABACKUP_BINDIR=$${NEOHA_IT_XTRABACKUP_BINDIR:-/home/wslu/work/mysql/xtrabackup-8.0.35} \
-		bin/neoha-it.test -test.v -test.timeout=10m -test.count=1
+		bin/neoha-it.test -test.v -test.timeout=15m -test.count=1
 
 PKGS =	./internal/base/common/... \
 	./internal/base/nlog/... \

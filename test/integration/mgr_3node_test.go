@@ -32,8 +32,10 @@ import (
 )
 
 var (
-	mgrMySQLPorts = []int{13306, 13307, 13308}
-	mgrGRPorts    = []int{13361, 13362, 13363}
+	mgrMySQLPorts       = []int{13306, 13307, 13308}
+	mgrGRPorts          = []int{13361, 13362, 13363}
+	mgrMajorMySQLPorts  = []int{13326, 13327, 13328}
+	mgrMajorGRPorts     = []int{13381, 13382, 13383}
 )
 
 func requireMySQL80(t *testing.T) (*harness.MySQL80, string) {

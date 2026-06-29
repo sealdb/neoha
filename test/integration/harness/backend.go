@@ -58,6 +58,7 @@ type Node struct {
 	Name     string
 	Port     int
 	GRPort   int // group_replication local address port (MySQL MGR)
+	GRSeeds  string // group_replication_group_seeds for this cluster
 	DataDir  string
 	Config   string // path to my.cnf or postgresql.conf
 	Socket   string
@@ -104,6 +105,14 @@ func (c *Cluster) Setup(ctx context.Context) error {
 	return c.SetupFresh(ctx, true)
 }
 
+// SetupReset stops stale processes, removes the workdir, and re-initializes all nodes.
+// Use for tests that leave MGR/replication in a state unsafe to reuse (e.g. majority loss).
+func (c *Cluster) SetupReset(ctx context.Context) error {
+	KillProcessesOnWorkDir(c.WorkDir)
+	_ = os.RemoveAll(c.WorkDir)
+	return c.SetupFresh(ctx, false)
+}
+
 // SetupFresh initializes nodes; when clean is true, stale processes are stopped and
 // the workdir is removed only if datadirs are missing or incomplete.
 func (c *Cluster) SetupFresh(ctx context.Context, clean bool) error {
@@ -116,9 +125,11 @@ func (c *Cluster) SetupFresh(ctx context.Context, clean bool) error {
 	if err := os.MkdirAll(c.WorkDir, 0o755); err != nil {
 		return err
 	}
+	grSeeds := c.mgrGroupSeeds()
 	var wg sync.WaitGroup
 	errCh := make(chan error, len(c.Nodes))
 	for _, node := range c.Nodes {
+		node.GRSeeds = grSeeds
 		wg.Add(1)
 		go func(n *Node) {
 			defer wg.Done()
@@ -155,6 +166,19 @@ func (c *Cluster) datadirsReady() bool {
 		}
 	}
 	return true
+}
+
+func (c *Cluster) mgrGroupSeeds() string {
+	var ports []int
+	for _, n := range c.Nodes {
+		if n.GRPort > 0 {
+			ports = append(ports, n.GRPort)
+		}
+	}
+	if len(ports) == 0 {
+		return "127.0.0.1:13361,127.0.0.1:13362,127.0.0.1:13363"
+	}
+	return FormatGRSeeds(ports)
 }
 
 // StartAll starts every node in parallel and waits until ready.

@@ -1,6 +1,8 @@
 /*
  * Copyright 2022-2026 The NeoHA Authors.
  *
+ * See the AUTHORS file for a list of contributors.
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -181,6 +183,9 @@ func (d *stubMGRDriver) ApplyPrimaryMGRPhase2(context.Context) error {
 	d.role = dbdriver.RolePrimary
 	return nil
 }
+func (d *stubMGRDriver) MGRReplicaJoined(context.Context) (bool, error) {
+	return false, nil
+}
 
 func TestReconcilerApplyReplicaWhenFollower(t *testing.T) {
 	log := nlog.NewStdLog(nlog.Level(nlog.PANIC))
@@ -199,6 +204,29 @@ func TestReconcilerApplyReplicaWhenFollower(t *testing.T) {
 	}
 	assert.NoError(t, r.applyReplicaIfNeeded(context.Background(), desired))
 	assert.Equal(t, 1, drv.applyReplica)
+}
+
+func TestReconcilerReapplyMGRReplicaWhenNotJoined(t *testing.T) {
+	log := nlog.NewStdLog(nlog.Level(nlog.PANIC))
+	drv := &stubMGRDriver{
+		stubDriver: stubDriver{role: dbdriver.RoleReplica, writable: false},
+		mgrMode:    true,
+	}
+	r := NewReconciler(log, &stubCoord{leader: false}, drv, config.DefaultTagsConfig(), WithApplyPromote(true))
+	r.lastReplicaPrimary = "127.0.0.1:13308"
+
+	desired := DesiredState{
+		DBRole: dbdriver.RoleReplica,
+		Primary: dbdriver.PrimaryRef{
+			MemberID: "127.0.0.1:18103",
+			Host:     "127.0.0.1",
+			Port:     13308,
+		},
+		Reason: "not.coord.leader",
+	}
+	assert.NoError(t, r.applyReplicaIfNeeded(context.Background(), desired))
+	assert.Equal(t, 1, drv.applyReplica)
+	assert.Equal(t, "127.0.0.1:13308", r.lastReplicaPrimary)
 }
 
 func TestEnrichPrimaryRef(t *testing.T) {

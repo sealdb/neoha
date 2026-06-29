@@ -146,6 +146,15 @@ func writeMGRConfig(n *harness.NeoHANode, mysqlBase, defaultsFile, clusterWorkDi
 	return n.WriteConfig(mysqlBase, defaultsFile, clusterWorkDir, mysqlDataDir, peers)
 }
 
+func writeMGRMajorConfig(n *harness.NeoHANode, mysqlBase, defaultsFile, clusterWorkDir, mysqlDataDir string, peers []string) error {
+	grPort := n.MySQLPort + 55
+	if n.MySQLPort >= 13326 && n.MySQLPort <= 13328 {
+		grPort = mgrMajorGRPorts[n.MySQLPort-13326]
+	}
+	return n.WriteMGRConfig(mysqlBase, defaultsFile, clusterWorkDir, mysqlDataDir, peers, grPort,
+		harness.FormatGRSeeds(mgrMajorGRPorts))
+}
+
 func writeSemiSyncConfig(n *harness.NeoHANode, mysqlBase, defaultsFile, clusterWorkDir, mysqlDataDir string, peers []string) error {
 	return n.WriteSemiSyncConfig(mysqlBase, defaultsFile, clusterWorkDir, mysqlDataDir, peers)
 }

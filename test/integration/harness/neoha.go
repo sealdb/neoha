@@ -188,8 +188,8 @@ func (n *NeoHANode) WriteSemiSyncConfig(mysqlBase, defaultsFile, clusterWorkDir,
 	return writeCLIConfigPath(filepath.Dir(n.ConfigPath), n.ConfigPath)
 }
 
-// WriteConfig writes a NeoHA config for MGR integration tests.
-func (n *NeoHANode) WriteConfig(mysqlBase, defaultsFile, clusterWorkDir, mysqlDataDir string, peers []string) error {
+// WriteMGRConfig writes NeoHA config for MGR integration tests.
+func (n *NeoHANode) WriteMGRConfig(mysqlBase, defaultsFile, clusterWorkDir, mysqlDataDir string, peers []string, grLocalPort int, grSeeds string) error {
 	if err := os.MkdirAll(n.MetaDir, 0o755); err != nil {
 		return err
 	}
@@ -222,8 +222,8 @@ func (n *NeoHANode) WriteConfig(mysqlBase, defaultsFile, clusterWorkDir, mysqlDa
 	conf.Database.Mysql.MasterSysVars = fmt.Sprintf(
 		"group_replication_group_name='%s'", mgrGroupName)
 	conf.Database.Mysql.SlaveSysVars = fmt.Sprintf(
-		"group_replication_group_name='%s';group_replication_local_address='127.0.0.1:%d';group_replication_group_seeds='127.0.0.1:13361,127.0.0.1:13362,127.0.0.1:13363'",
-		mgrGroupName, n.MySQLPort+55)
+		"group_replication_group_name='%s';group_replication_local_address='127.0.0.1:%d';group_replication_group_seeds='%s'",
+		mgrGroupName, grLocalPort, grSeeds)
 
 	LoadIntegrationSettings().ApplyBackupConfig(conf, n.MySQLPort, mysqlBase, defaultsFile, mysqlDataDir)
 	applyHAIT(conf)
@@ -232,6 +232,12 @@ func (n *NeoHANode) WriteConfig(mysqlBase, defaultsFile, clusterWorkDir, mysqlDa
 		return err
 	}
 	return writeCLIConfigPath(filepath.Dir(n.ConfigPath), n.ConfigPath)
+}
+
+// WriteConfig writes a NeoHA config for MGR integration tests.
+func (n *NeoHANode) WriteConfig(mysqlBase, defaultsFile, clusterWorkDir, mysqlDataDir string, peers []string) error {
+	return n.WriteMGRConfig(mysqlBase, defaultsFile, clusterWorkDir, mysqlDataDir, peers, n.MySQLPort+55,
+		"127.0.0.1:13361,127.0.0.1:13362,127.0.0.1:13363")
 }
 
 // WriteEtcdPGConfig writes NeoHA config for PostgreSQL + etcd integration tests.

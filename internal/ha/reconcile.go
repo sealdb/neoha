@@ -1,6 +1,8 @@
 /*
  * Copyright 2022-2026 The NeoHA Authors.
  *
+ * See the AUTHORS file for a list of contributors.
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -232,8 +234,23 @@ func (r *Reconciler) applyReplicaIfNeeded(ctx context.Context, desired DesiredSt
 	}
 	ref := enrichPrimaryRef(desired.Primary, r.mysqlPort)
 	targetKey := replicaTargetKey(ref)
-	if targetKey == "" || targetKey == r.lastReplicaPrimary {
+	if targetKey == "" {
 		return nil
+	}
+	if targetKey == r.lastReplicaPrimary {
+		if mgr, ok := r.driver.(dbdriver.MGRLifecycle); ok && mgr.IsMGRMode() {
+			joined, err := mgr.MGRReplicaJoined(ctx)
+			if err != nil {
+				return err
+			}
+			if joined {
+				return nil
+			}
+			r.log.Info("reconcile.reapply.mgr.replica primary[%s] db[%s] reason[not.joined]", pid, targetKey)
+			r.lastReplicaPrimary = ""
+		} else {
+			return nil
+		}
 	}
 	r.log.Info("reconcile.apply.replica primary[%s] db[%s] reason[%s]", pid, targetKey, desired.Reason)
 	if err := r.driver.ApplyReplica(ctx, ref); err != nil {

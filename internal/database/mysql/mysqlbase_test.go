@@ -386,6 +386,13 @@ func TestMysqlBaseChangeToMasterForMGR(t *testing.T) {
 	mysqlbase.SetReplMode(model.ReplModeMGR)
 	defer db.Close()
 
+	mgrStatsQuery := "SELECT MEMBER_ID,MEMBER_HOST,MEMBER_STATE FROM performance_schema.replication_group_members"
+	mock.ExpectQuery(mgrStatsQuery).WillReturnRows(
+		sqlmock.NewRows([]string{"MEMBER_ID", "MEMBER_HOST", "MEMBER_STATE"}).
+			AddRow("uuid1", "127.0.0.1", model.MGRStateOnline).
+			AddRow("uuid2", "127.0.0.1", model.MGRStateOnline),
+	)
+
 	queryList := []string{"STOP GROUP_REPLICATION",
 		`CHANGE MASTER TO MASTER_USER = 'username', MASTER_PASSWORD = 'password' FOR CHANNEL 'group_replication_recovery'`,
 		"SET GLOBAL group_replication_bootstrap_group=ON",
@@ -393,11 +400,79 @@ func TestMysqlBaseChangeToMasterForMGR(t *testing.T) {
 		"SET GLOBAL group_replication_bootstrap_group=OFF",
 	}
 
-	mock.ExpectExec(queryList[0]).WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectExec(queryList[1]).WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectExec(queryList[2]).WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectExec(queryList[3]).WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectExec(queryList[4]).WillReturnResult(sqlmock.NewResult(1, 1))
+	for _, q := range queryList {
+		mock.ExpectExec(q).WillReturnResult(sqlmock.NewResult(1, 1))
+	}
+	master := model.Repl{
+		Master_Host:   "localhost",
+		Master_Port:   123,
+		Repl_User:     "username",
+		Repl_Password: "password",
+	}
+	err = mysqlbase.ChangeToMaster(db, &master)
+	assert.Nil(t, err)
+}
+
+func TestMysqlBaseChangeToMasterForMGRForceBootstrap(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.Nil(t, err)
+	mysqlbase.SetQueryTimeout(10000)
+	mysqlbase.SetReplMode(model.ReplModeMGR)
+	defer db.Close()
+
+	mgrStatsQuery := "SELECT MEMBER_ID,MEMBER_HOST,MEMBER_STATE FROM performance_schema.replication_group_members"
+	mock.ExpectQuery(mgrStatsQuery).WillReturnRows(
+		sqlmock.NewRows([]string{"MEMBER_ID", "MEMBER_HOST", "MEMBER_STATE"}).
+			AddRow("uuid1", "127.0.0.1", model.MGRStateOnline),
+	)
+	mock.ExpectQuery("SELECT @@GLOBAL.group_replication_local_address").WillReturnRows(
+		sqlmock.NewRows([]string{"@@GLOBAL.group_replication_local_address"}).AddRow("127.0.0.1:13363"),
+	)
+
+	queryList := []string{
+		"SET GLOBAL group_replication_force_members = '127.0.0.1:13363'",
+		"STOP GROUP_REPLICATION",
+		`CHANGE MASTER TO MASTER_USER = 'username', MASTER_PASSWORD = 'password' FOR CHANNEL 'group_replication_recovery'`,
+		"SET GLOBAL group_replication_bootstrap_group=ON",
+		"START GROUP_REPLICATION",
+		"SET GLOBAL group_replication_bootstrap_group=OFF",
+		"SET GLOBAL group_replication_force_members = ''",
+	}
+	for _, q := range queryList {
+		mock.ExpectExec(q).WillReturnResult(sqlmock.NewResult(1, 1))
+	}
+	master := model.Repl{
+		Master_Host:   "localhost",
+		Master_Port:   123,
+		Repl_User:     "username",
+		Repl_Password: "password",
+	}
+	err = mysqlbase.ChangeToMaster(db, &master)
+	assert.Nil(t, err)
+}
+
+func TestMysqlBaseChangeToMasterForMGRFreshBootstrap(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	assert.Nil(t, err)
+	mysqlbase.SetQueryTimeout(10000)
+	mysqlbase.SetReplMode(model.ReplModeMGR)
+	defer db.Close()
+
+	mgrStatsQuery := "SELECT MEMBER_ID,MEMBER_HOST,MEMBER_STATE FROM performance_schema.replication_group_members"
+	mock.ExpectQuery(mgrStatsQuery).WillReturnRows(
+		sqlmock.NewRows([]string{"MEMBER_ID", "MEMBER_HOST", "MEMBER_STATE"}),
+	)
+
+	queryList := []string{
+		"STOP GROUP_REPLICATION",
+		`CHANGE MASTER TO MASTER_USER = 'username', MASTER_PASSWORD = 'password' FOR CHANNEL 'group_replication_recovery'`,
+		"SET GLOBAL group_replication_bootstrap_group=ON",
+		"START GROUP_REPLICATION",
+		"SET GLOBAL group_replication_bootstrap_group=OFF",
+	}
+	for _, q := range queryList {
+		mock.ExpectExec(q).WillReturnResult(sqlmock.NewResult(1, 1))
+	}
 	master := model.Repl{
 		Master_Host:   "localhost",
 		Master_Port:   123,

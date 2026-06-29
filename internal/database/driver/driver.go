@@ -1,6 +1,8 @@
 /*
  * Copyright 2022-2026 The NeoHA Authors.
  *
+ * See the AUTHORS file for a list of contributors.
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -103,4 +105,6 @@ type MGRLifecycle interface {
 	MGRPrimaryPhase1Done(ctx context.Context) (bool, error)
 	MGRClusterWritableReady(ctx context.Context) (bool, error)
 	ApplyPrimaryMGRPhase2(ctx context.Context) error
+	// MGRReplicaJoined reports whether local mysqld is a live MGR secondary.
+	MGRReplicaJoined(ctx context.Context) (bool, error)
 }

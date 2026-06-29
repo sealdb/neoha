@@ -19,6 +19,7 @@
 package harness
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -27,6 +28,26 @@ import (
 	"syscall"
 	"time"
 )
+
+// FormatGRSeeds builds a group_replication_group_seeds value from GR ports.
+func FormatGRSeeds(ports []int) string {
+	parts := make([]string, len(ports))
+	for i, p := range ports {
+		parts[i] = fmt.Sprintf("127.0.0.1:%d", p)
+	}
+	return strings.Join(parts, ",")
+}
+func WaitPortFree(ctx context.Context, host string, port int) error {
+	for {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if !portInUse(host, port) {
+			return nil
+		}
+		time.Sleep(readyPollInterval)
+	}
+}
 
 // portInUse reports whether something is listening on host:port.
 func portInUse(host string, port int) bool {

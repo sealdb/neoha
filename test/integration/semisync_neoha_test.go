@@ -39,7 +39,7 @@ var (
 // formation verification and minority failover.
 func TestNeoHASemiSyncWarmSuite(t *testing.T) {
 	warm := bootstrapWarmNeoHA(t,
-		newWarmMySQLCluster(t, warmSemiSyncClusterName, semiSyncMySQLPorts, nil, true),
+		newWarmMySQLCluster(t, warmSemiSyncClusterName, semiSyncMySQLPorts, nil, true, false),
 		semiSyncRaftPorts1,
 		writeSemiSyncConfig,
 		neoHAStartOpts{skipCLIWire: true},

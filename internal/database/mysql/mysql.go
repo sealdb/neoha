@@ -145,6 +145,7 @@ func (m *Mysql) handlePingFailure(err error, downsLimits int) {
 		} else {
 			m.setDeadDueToTooManyConnections(false)
 		}
+		m.resetDB()
 		m.setState(model.MysqlDead)
 	}
 	m.IncMysqlDowns()
@@ -282,6 +283,15 @@ func (m *Mysql) configureDBPool(db *sql.DB) {
 	}
 	db.SetMaxOpenConns(maxOpen)
 	db.SetMaxIdleConns(maxIdle)
+}
+
+func (m *Mysql) resetDB() {
+	m.dbmutex.Lock()
+	defer m.dbmutex.Unlock()
+	if m.db != nil {
+		_ = m.db.Close()
+		m.db = nil
+	}
 }
 
 // Get ReplGtidPurged
