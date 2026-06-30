@@ -1,8 +1,10 @@
-[NeoHA Build](https://github.com/sealdb/neoha/actions/workflows/neoha-build.yml)
-[NeoHA Test](https://github.com/sealdb/neoha/actions/workflows/neoha-test.yml)
-[NeoHA Coverage](https://github.com/sealdb/neoha/actions/workflows/neoha-coverage.yml)
-[Go Reference](https://pkg.go.dev/github.com/sealdb/neoha)
-[codecov](https://codecov.io/gh/sealdb/neoha)
+[![NeoHA Build](https://github.com/sealdb/neoha/actions/workflows/neoha-build.yml/badge.svg?branch=main)](https://github.com/sealdb/neoha/actions/workflows/neoha-build.yml)
+[![NeoHA Test](https://github.com/sealdb/neoha/actions/workflows/neoha-test.yml/badge.svg?branch=main)](https://github.com/sealdb/neoha/actions/workflows/neoha-test.yml)
+[![NeoHA Coverage](https://github.com/sealdb/neoha/actions/workflows/neoha-coverage.yml/badge.svg?branch=main)](https://github.com/sealdb/neoha/actions/workflows/neoha-coverage.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/sealdb/neoha.svg)](https://pkg.go.dev/github.com/sealdb/neoha)
+[![codecov](https://codecov.io/gh/sealdb/neoha/branch/main/graph/badge.svg)](https://codecov.io/gh/sealdb/neoha)
+
+---
 
 # NeoHA
 
