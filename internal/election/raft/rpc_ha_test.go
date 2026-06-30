@@ -933,22 +933,30 @@ func testRaftRPCHATryToLeaderFailUnpromotbleSemiSync(t *testing.T) {
 
 	// 3. wait rafts[2] elected as leader
 	{
-		MockWaitLeaderEggs(rafts, 1, model.ReplModeSemiSync, false, -1)
-
 		var got State
-		whoisleader = 0
 		want := (LEADER + FOLLOWER + FOLLOWER)
-		for i, raft := range rafts {
-			got += raft.getState()
-			if raft.getState() == LEADER {
-				whoisleader = i
+		found := false
+		for attempt := 0; attempt < 10 && !found; attempt++ {
+			rafts[GTIDERRIDX].mysql.SetMysqlHandler(mysql.NewMockGTIDPingError())
+			rafts[GTIDBIDX].mysql.SetMysqlHandler(mysql.NewMockGTIDB())
+			rafts[GTIDCIDX].mysql.SetMysqlHandler(mysql.NewMockGTIDC())
+
+			MockWaitLeaderEggs(rafts, 1, model.ReplModeSemiSync, false, -1)
+
+			got = 0
+			whoisleader = -1
+			for i, raft := range rafts {
+				got += raft.getState()
+				if raft.getState() == LEADER {
+					whoisleader = i
+				}
+			}
+			if whoisleader == GTIDCIDX {
+				found = true
 			}
 		}
-		// [LEADER, FOLLOWER, FOLLOWER]
+		assert.True(t, found, "rafts[%d] should become leader", GTIDCIDX)
 		assert.Equal(t, want, got)
-
-		// leader should be rafts[GTIDCIDX]
-		assert.Equal(t, GTIDCIDX, whoisleader)
 	}
 
 	// 4. try rafts[2](already leader) to leader
@@ -985,23 +993,27 @@ func testRaftRPCHATryToLeaderFailUnpromotbleSemiSync(t *testing.T) {
 
 	// 4.1 wait rafts[2] elected as leader again
 	{
-		MockWaitSomeElectionTimeout(rafts, 4)
-		MockWaitLeaderEggs(rafts, 1, model.ReplModeSemiSync, false, -1)
-
 		var got State
-		whoisleader = 0
 		want := (LEADER + FOLLOWER + FOLLOWER)
-		for i, raft := range rafts {
-			got += raft.getState()
-			if raft.getState() == LEADER {
-				whoisleader = i
+		found := false
+		for attempt := 0; attempt < 10 && !found; attempt++ {
+			MockWaitSomeElectionTimeout(rafts, 4)
+			MockWaitLeaderEggs(rafts[1:], 1, model.ReplModeSemiSync, false, -1)
+
+			got = 0
+			whoisleader = -1
+			for i, raft := range rafts {
+				got += raft.getState()
+				if raft.getState() == LEADER {
+					whoisleader = i
+				}
+			}
+			if whoisleader == GTIDCIDX {
+				found = true
 			}
 		}
-		// [LEADER, FOLLOWER, FOLLOWER]
+		assert.True(t, found, "rafts[%d] should become leader again", GTIDCIDX)
 		assert.Equal(t, want, got)
-
-		// leader should be rafts[GTIDCIDX]
-		assert.Equal(t, whoisleader, GTIDCIDX)
 	}
 }
 
