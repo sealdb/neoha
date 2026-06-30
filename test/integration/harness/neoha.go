@@ -71,6 +71,11 @@ func applyMGRRaftIT(conf *config.Config) {
 	conf.Election.Raft.AdmitDefeatHtCnt = mgrITAdmitDefeatHtCnt
 }
 
+func applyHAIT(conf *config.Config) {
+	conf.HA.DelegateDBApply = true
+	conf.HA.ReconcileInterval = 1
+}
+
 // BuildNeoHA compiles the neoha daemon to outPath (go build uses the module cache; always invoke it so dependency changes are picked up).
 func BuildNeoHA(ctx context.Context, repoRoot, outPath string) error {
 	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
@@ -133,6 +138,7 @@ func (n *NeoHANode) WritePlainConfig(mysqlBase, defaultsFile, clusterWorkDir, my
 	conf.Database.Mysql.MonitorDisabled = true
 
 	LoadIntegrationSettings().ApplyBackupConfig(conf, n.MySQLPort, mysqlBase, defaultsFile, mysqlDataDir)
+	applyHAIT(conf)
 
 	if err := config.WriteConfig(n.ConfigPath, conf); err != nil {
 		return err
@@ -174,6 +180,7 @@ func (n *NeoHANode) WriteSemiSyncConfig(mysqlBase, defaultsFile, clusterWorkDir,
 	conf.Database.Mysql.SemiSyncTimeoutForTwoNodes = 10000
 
 	LoadIntegrationSettings().ApplyBackupConfig(conf, n.MySQLPort, mysqlBase, defaultsFile, mysqlDataDir)
+	applyHAIT(conf)
 
 	if err := config.WriteConfig(n.ConfigPath, conf); err != nil {
 		return err
@@ -181,8 +188,8 @@ func (n *NeoHANode) WriteSemiSyncConfig(mysqlBase, defaultsFile, clusterWorkDir,
 	return writeCLIConfigPath(filepath.Dir(n.ConfigPath), n.ConfigPath)
 }
 
-// WriteConfig writes a NeoHA config for MGR integration tests.
-func (n *NeoHANode) WriteConfig(mysqlBase, defaultsFile, clusterWorkDir, mysqlDataDir string, peers []string) error {
+// WriteMGRConfig writes NeoHA config for MGR integration tests.
+func (n *NeoHANode) WriteMGRConfig(mysqlBase, defaultsFile, clusterWorkDir, mysqlDataDir string, peers []string, grLocalPort int, grSeeds string) error {
 	if err := os.MkdirAll(n.MetaDir, 0o755); err != nil {
 		return err
 	}
@@ -215,10 +222,59 @@ func (n *NeoHANode) WriteConfig(mysqlBase, defaultsFile, clusterWorkDir, mysqlDa
 	conf.Database.Mysql.MasterSysVars = fmt.Sprintf(
 		"group_replication_group_name='%s'", mgrGroupName)
 	conf.Database.Mysql.SlaveSysVars = fmt.Sprintf(
-		"group_replication_group_name='%s';group_replication_local_address='127.0.0.1:%d';group_replication_group_seeds='127.0.0.1:13361,127.0.0.1:13362,127.0.0.1:13363'",
-		mgrGroupName, n.MySQLPort+55)
+		"group_replication_group_name='%s';group_replication_local_address='127.0.0.1:%d';group_replication_group_seeds='%s'",
+		mgrGroupName, grLocalPort, grSeeds)
 
 	LoadIntegrationSettings().ApplyBackupConfig(conf, n.MySQLPort, mysqlBase, defaultsFile, mysqlDataDir)
+	applyHAIT(conf)
+
+	if err := config.WriteConfig(n.ConfigPath, conf); err != nil {
+		return err
+	}
+	return writeCLIConfigPath(filepath.Dir(n.ConfigPath), n.ConfigPath)
+}
+
+// WriteConfig writes a NeoHA config for MGR integration tests.
+func (n *NeoHANode) WriteConfig(mysqlBase, defaultsFile, clusterWorkDir, mysqlDataDir string, peers []string) error {
+	return n.WriteMGRConfig(mysqlBase, defaultsFile, clusterWorkDir, mysqlDataDir, peers, n.MySQLPort+55,
+		"127.0.0.1:13361,127.0.0.1:13362,127.0.0.1:13363")
+}
+
+// WriteEtcdPGConfig writes NeoHA config for PostgreSQL + etcd integration tests.
+func (n *NeoHANode) WriteEtcdPGConfig(pgBase, dataDir, etcdEndpoint string, pgPort int) error {
+	if err := os.MkdirAll(n.MetaDir, 0o755); err != nil {
+		return err
+	}
+
+	conf := config.DefaultConfig()
+	conf.Scope = "neoha-pg-it"
+	conf.Name = n.Name
+	conf.Endpoint = n.Endpoint
+	conf.Log.Level = "INFO"
+
+	conf.Coordination.Provider = "etcd"
+	conf.Coordination.Etcd.Host = etcdEndpoint
+	conf.Coordination.Etcd.TTL = 5
+
+	conf.Database.Type = "postgresql"
+	conf.Database.Postgresql.Version = "postgresql14"
+	conf.Database.Postgresql.Listen = fmt.Sprintf("127.0.0.1:%d", pgPort)
+	conf.Database.Postgresql.ConnectAddress = fmt.Sprintf("127.0.0.1:%d", pgPort)
+	conf.Database.Postgresql.DataDir = dataDir
+	conf.Database.Postgresql.BinDir = filepath.Join(pgBase, "bin")
+	conf.Database.Postgresql.UseSlots = true
+	conf.Database.Postgresql.PrimarySlotName = n.Name
+	conf.Database.Postgresql.UsePGRewind = true
+	conf.Database.Postgresql.Auth.Repl.Username = PGReplUser
+	conf.Database.Postgresql.Auth.Repl.Password = PGReplPass
+	conf.Database.Postgresql.Auth.SuperUser.Username = PGSuperUser
+	conf.Database.Postgresql.Auth.SuperUser.Password = PGSuperPass
+	conf.Database.Postgresql.Auth.Rewind.Username = PGSuperUser
+	conf.Database.Postgresql.Auth.Rewind.Password = PGSuperPass
+
+	applyHAIT(conf)
+	conf.HA.PrimaryHooks.OnPrimaryStart = "nop"
+	conf.HA.PrimaryHooks.OnPrimaryStop = "nop"
 
 	if err := config.WriteConfig(n.ConfigPath, conf); err != nil {
 		return err
@@ -280,7 +336,14 @@ func (n *NeoHANode) Stop(ctx context.Context) error {
 	}
 	_ = n.cmd.Process.Signal(os.Interrupt)
 	done := make(chan error, 1)
-	go func() { done <- n.cmd.Wait() }()
+	cmd := n.cmd
+	go func() {
+		if cmd != nil {
+			done <- cmd.Wait()
+		} else {
+			done <- nil
+		}
+	}()
 	select {
 	case <-ctx.Done():
 		_ = n.cmd.Process.Kill()

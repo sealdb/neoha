@@ -50,6 +50,7 @@ type ITConfigFile struct {
 	WorkDir          string `yaml:"workdir" json:"workdir"`
 	NeoHABin         string `yaml:"neoha-bin" json:"neoha-bin"`
 	NeoHACtlBin      string `yaml:"neohactl-bin" json:"neohactl-bin"`
+	PGBase           string `yaml:"pg-base" json:"pg-base"`
 	SSHHost          string `yaml:"ssh-host" json:"ssh-host"`
 	SSHPort          int    `yaml:"ssh-port" json:"ssh-port"`
 	SSHUser          string `yaml:"ssh-user" json:"ssh-user"`

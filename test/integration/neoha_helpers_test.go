@@ -79,8 +79,18 @@ func buildNeoHActl(t *testing.T, ctx context.Context) string {
 	return out
 }
 
-func startNeoHACluster(t *testing.T, ctx context.Context, cluster *harness.Cluster, raftPorts []int, writeConfig neoHAConfigWriter) ([]*harness.NeoHANode, []string) {
+type neoHAStartOpts struct {
+	// skipCLIWire skips neohactl raft enable + cluster add when peers.json is pre-written.
+	skipCLIWire bool
+}
+
+func startNeoHACluster(t *testing.T, ctx context.Context, cluster *harness.Cluster, raftPorts []int, writeConfig neoHAConfigWriter, opts ...neoHAStartOpts) ([]*harness.NeoHANode, []string) {
 	t.Helper()
+	var o neoHAStartOpts
+	if len(opts) > 0 {
+		o = opts[0]
+	}
+
 	if err := harness.EnsurePortsFree(raftPorts); err != nil {
 		t.Fatalf("port check: %v", err)
 	}
@@ -122,14 +132,27 @@ func startNeoHACluster(t *testing.T, ctx context.Context, cluster *harness.Clust
 		t.Fatal(err)
 	}
 
-	t.Log("neoha: wire cluster via neohactl raft enable + cluster add")
-	assert.NoError(t, harness.WireNeoHAClusterViaCLI(ctx, ctlBin, nodes, endpoints))
+	if o.skipCLIWire {
+		t.Log("neoha: skip CLI wire (peers.json pre-populated)")
+	} else {
+		t.Log("neoha: wire cluster via neohactl raft enable + cluster add")
+		assert.NoError(t, harness.WireNeoHAClusterViaCLI(ctx, ctlBin, nodes, endpoints))
+	}
 
 	return nodes, endpoints
 }
 
 func writeMGRConfig(n *harness.NeoHANode, mysqlBase, defaultsFile, clusterWorkDir, mysqlDataDir string, peers []string) error {
 	return n.WriteConfig(mysqlBase, defaultsFile, clusterWorkDir, mysqlDataDir, peers)
+}
+
+func writeMGRMajorConfig(n *harness.NeoHANode, mysqlBase, defaultsFile, clusterWorkDir, mysqlDataDir string, peers []string) error {
+	grPort := n.MySQLPort + 55
+	if n.MySQLPort >= 13326 && n.MySQLPort <= 13328 {
+		grPort = mgrMajorGRPorts[n.MySQLPort-13326]
+	}
+	return n.WriteMGRConfig(mysqlBase, defaultsFile, clusterWorkDir, mysqlDataDir, peers, grPort,
+		harness.FormatGRSeeds(mgrMajorGRPorts))
 }
 
 func writeSemiSyncConfig(n *harness.NeoHANode, mysqlBase, defaultsFile, clusterWorkDir, mysqlDataDir string, peers []string) error {

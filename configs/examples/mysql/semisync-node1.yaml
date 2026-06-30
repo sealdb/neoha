@@ -1,9 +1,13 @@
-scope: neoha
-namespace: /service/
-name: db1
-endpoint: ""
+# NeoHA + MySQL semi-sync — 单节点示例（node1）
+# JSON 版见 semisync-node1.json（无行内注释，字段说明以本文件为准）
+
+scope: neoha                    # 逻辑集群名
+namespace: /service/            # 外置 DCS 键前缀
+name: db1                       # 本成员名
+endpoint: 127.0.0.1:8080      # NeoHA RPC 地址（Raft 成员 ID）
+
 restapi:
-    enable-apis: false
+    enable-apis: false          # 是否启用 REST
     listen: 127.0.0.1:8008
     connect_address: 127.0.0.1:8008
     certfile: ""
@@ -11,12 +15,33 @@ restapi:
     authentication:
         username: ""
         password: ""
+
 ctl:
-    insecure: false
+    insecure: false             # neohactl 跳过 TLS 校验
     certfile: ""
     cacert: ""
-election:
+
+election:                       # legacy；等价于 coordination
     algorithm: raft
+    raft:
+        meta-datadir: .         # peers.json 等
+        heartbeat-timeout: 1000 # ms
+        admit-defeat-hearbeat-count: 10
+        election-timeout: 3000
+        purge-binlog-interval: 300000
+        super-idle: false
+        leader-start-command: nop   # legacy → ha.primary_hooks
+        leader-stop-command: nop
+        purge-binlog-disabled: false
+        requesttimeout: 1000
+        candidate-wait-for-2nodes: 60000
+    etcd:
+        host: ""
+        hosts: []
+        use_proxies: false
+
+coordination:                   # 推荐使用
+    provider: raft
     raft:
         meta-datadir: .
         heartbeat-timeout: 1000
@@ -33,7 +58,8 @@ election:
         host: ""
         hosts: []
         use_proxies: false
-bootstrap:
+
+bootstrap:                      # 仅首次 init
     postgresql:
         dcs:
             ttl: 30
@@ -58,9 +84,10 @@ bootstrap:
         post_init: ""
         users: []
     mysql: {}
+
 database:
     type: mysql
-    postgresql:
+    postgresql:                 # type=mysql 时忽略
         version: postgresql14
         listen: 127.0.0.1:5432
         connect_address: 127.0.0.1:5432
@@ -118,14 +145,24 @@ database:
             port: 3306
             basedir: /u01/mysql/
             defaults-file: /etc/my3306.cnf
+
 watchdog:
     mode: automatic
     device: /dev/watchdog
     safety_margin: 5
+
 tags:
     nofailover: false
     noloadbalance: false
     clonefrom: false
     nosync: false
+
+ha:
+    reconcile_interval: 3
+    delegate_db_apply: false
+    primary_hooks:
+        on_primary_start: nop
+        on_primary_stop: nop
+
 log:
     level: INFO

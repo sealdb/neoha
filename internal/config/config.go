@@ -19,11 +19,12 @@
 package config
 
 import (
-	"github.com/pkg/errors"
-	"github.com/sealdb/neoha/internal/base/model"
 	"os"
+	"strings"
 
+	"github.com/pkg/errors"
 	"github.com/sealdb/neoha/internal/base/common"
+	"github.com/sealdb/neoha/internal/base/model"
 )
 
 var (
@@ -79,6 +80,8 @@ type EtcdConfig struct {
 	Host       string   `yaml:"host" json:"host"`
 	Hosts      []string `yaml:"hosts" json:"hosts"`
 	UseProxies bool     `yaml:"use_proxies" json:"use_proxies"`
+	// TTL is the DCS leader lease TTL in seconds (Patroni-style).
+	TTL int `yaml:"ttl" json:"ttl"`
 	/*
 	 * Provide host to do the initial discovery of the cluster topology:
 	 * host: 127.0.0.1:2379
@@ -99,6 +102,7 @@ func DefaultEtcdConfig() *EtcdConfig {
 	return &EtcdConfig{
 		Host:  "",
 		Hosts: []string{},
+		TTL:   30,
 	}
 }
 
@@ -165,6 +169,52 @@ func DefaultElectionConfig() *ElectionConfig {
 		Raft: DefaultRaftConfig(),
 		Etcd: DefaultEtcdConfig(),
 	}
+}
+
+// CoordinationConfig is the target name for election/coordination settings.
+// Prefer this block in new configs; election is kept as a deprecated alias.
+type CoordinationConfig struct {
+	Provider string      `yaml:"provider" json:"provider"`
+	Raft     *RaftConfig `yaml:"raft" json:"raft"`
+	Etcd     *EtcdConfig `yaml:"etcd" json:"etcd"`
+}
+
+func DefaultCoordinationConfig() *CoordinationConfig {
+	ec := DefaultElectionConfig()
+	return &CoordinationConfig{
+		Provider: ec.Algo,
+		Raft:     ec.Raft,
+		Etcd:     ec.Etcd,
+	}
+}
+
+// EffectiveCoordination returns the active coordination settings (coordination.* or election.*).
+func (c *Config) EffectiveCoordination() *CoordinationConfig {
+	if c == nil {
+		return DefaultCoordinationConfig()
+	}
+	if c.Coordination != nil && c.Coordination.Provider != "" {
+		out := &CoordinationConfig{
+			Provider: c.Coordination.Provider,
+			Raft:     c.Coordination.Raft,
+			Etcd:     c.Coordination.Etcd,
+		}
+		if out.Raft == nil && c.Election != nil {
+			out.Raft = c.Election.Raft
+		}
+		if out.Etcd == nil && c.Election != nil {
+			out.Etcd = c.Election.Etcd
+		}
+		return out
+	}
+	if c.Election != nil {
+		return &CoordinationConfig{
+			Provider: c.Election.Algo,
+			Raft:     c.Election.Raft,
+			Etcd:     c.Election.Etcd,
+		}
+	}
+	return DefaultCoordinationConfig()
 }
 
 type StandbyClusterConfig struct {
@@ -342,6 +392,14 @@ type PostgresqlConfig struct {
 	Krbsrvname     string            `yaml:"krbsrvname" json:"krbsrvname"`
 	Parameters     map[string]string `yaml:"parameters" json:"parameters"`
 	PrePromote     string            `yaml:"pre_promote" json:"pre_promote"`
+	// UseSlots enables primary_slot_name in recovery settings.
+	UseSlots bool `yaml:"use_slots" json:"use_slots"`
+	// PrimarySlotName is the physical replication slot on the primary for this replica.
+	PrimarySlotName string `yaml:"primary_slot_name" json:"primary_slot_name"`
+	// MaximumLagOnFailover max replay lag in bytes before promote is allowed (0 = no limit).
+	MaximumLagOnFailover int64 `yaml:"maximum_lag_on_failover" json:"maximum_lag_on_failover"`
+	// UsePGRewind runs pg_rewind when rejoining as replica after timeline fork (requires data_dir + bin_dir).
+	UsePGRewind bool `yaml:"use_pg_rewind" json:"use_pg_rewind"`
 }
 
 func DefaultPostgresqlConfig() *PostgresqlConfig {
@@ -560,6 +618,38 @@ func DefaultLogConfig() *LogConfig {
 	}
 }
 
+// HAConfig controls the L3 reconcile loop (see internal/ha, docs/architecture.md).
+type HAConfig struct {
+	// ReconcileInterval is seconds between reconcile ticks; 0 uses ha.DefaultReconcileInterval.
+	ReconcileInterval int `yaml:"reconcile_interval" json:"reconcile_interval"`
+	// DelegateDBApply lets Reconciler own demote and promotion (semi-sync + MGR).
+	DelegateDBApply bool `yaml:"delegate_db_apply" json:"delegate_db_apply"`
+	// PrimaryHooks run when this node becomes/stops serving as the writable primary (VIP, LB, …).
+	PrimaryHooks *PrimaryHooksConfig `yaml:"primary_hooks" json:"primary_hooks"`
+}
+
+// PrimaryHooksConfig configures shell hooks after the DB is promoted/demoted.
+// Prefer this over election.raft leader-start/stop-command (legacy alias).
+type PrimaryHooksConfig struct {
+	OnPrimaryStart string `yaml:"on_primary_start" json:"on_primary_start"`
+	OnPrimaryStop  string `yaml:"on_primary_stop" json:"on_primary_stop"`
+}
+
+func DefaultPrimaryHooksConfig() *PrimaryHooksConfig {
+	return &PrimaryHooksConfig{
+		OnPrimaryStart: "nop",
+		OnPrimaryStop:  "nop",
+	}
+}
+
+func DefaultHAConfig() *HAConfig {
+	return &HAConfig{
+		ReconcileInterval: 3,
+		DelegateDBApply:   false,
+		PrimaryHooks:      DefaultPrimaryHooksConfig(),
+	}
+}
+
 type Config struct {
 	Scope     string `yaml:"scope" json:"scope"`
 	NameSpace string `yaml:"namespace" json:"namespace"`
@@ -571,13 +661,15 @@ type Config struct {
 	// HTTP APIs address.
 	PeerAddress string `yaml:"peer-address,omitempty" json:"peer-address,omitempty"`
 
-	RestAPI   *RestAPIConfig   `yaml:"restapi" json:"restapi"`
-	Ctl       *CtlConfig       `yaml:"ctl" json:"ctl"`
-	Election  *ElectionConfig  `yaml:"election" json:"election"`
-	Bootstrap *BootstrapConfig `yaml:"bootstrap" json:"bootstrap"`
+	RestAPI       *RestAPIConfig       `yaml:"restapi" json:"restapi"`
+	Ctl           *CtlConfig           `yaml:"ctl" json:"ctl"`
+	Election      *ElectionConfig      `yaml:"election" json:"election"`           // deprecated: use coordination
+	Coordination  *CoordinationConfig  `yaml:"coordination" json:"coordination"`
+	Bootstrap     *BootstrapConfig     `yaml:"bootstrap" json:"bootstrap"`
 	Database  *DatabaseConfig  `yaml:"database" json:"database"`
 	Watchdog  *WatchdogConfig  `yaml:"watchdog" json:"watchdog"`
 	Tags      *TagsConfig      `yaml:"tags" json:"tags"`
+	HA        *HAConfig        `yaml:"ha" json:"ha"`
 	Log       *LogConfig       `yaml:"log" json:"log"`
 }
 
@@ -589,13 +681,15 @@ func DefaultConfig() *Config {
 		Endpoint:    "127.0.0.1:8080",
 		PeerAddress: ":6060",
 
-		RestAPI:   DefaultRestAPIConfig(),
-		Ctl:       DefaultCtlConfig(),
-		Election:  DefaultElectionConfig(),
-		Bootstrap: DefaultBootstrapConfig(),
+		RestAPI:       DefaultRestAPIConfig(),
+		Ctl:           DefaultCtlConfig(),
+		Election:      DefaultElectionConfig(),
+		Coordination:  DefaultCoordinationConfig(),
+		Bootstrap:     DefaultBootstrapConfig(),
 		Database:  DefaultDatabaseConfig(),
 		Watchdog:  DefaultWatchdogConfig(),
 		Tags:      DefaultTagsConfig(),
+		HA:        DefaultHAConfig(),
 		Log:       DefaultLogConfig(),
 	}
 }
@@ -633,4 +727,27 @@ func WriteConfig(filepath string, conf *Config) error {
 		return errors.WithStack(err)
 	}
 	return nil
+}
+
+// EffectivePrimaryHooks returns primary accessibility hooks, preferring ha.primary_hooks
+// and falling back to legacy election.raft leader-start/stop-command.
+func (c *Config) EffectivePrimaryHooks() PrimaryHooksConfig {
+	if c == nil {
+		return *DefaultPrimaryHooksConfig()
+	}
+	_ = c.Normalize()
+	out := *c.HA.PrimaryHooks
+	if strings.TrimSpace(out.OnPrimaryStart) == "" && c.Election != nil && c.Election.Raft != nil {
+		out.OnPrimaryStart = c.Election.Raft.LeaderStartCommand
+	}
+	if strings.TrimSpace(out.OnPrimaryStop) == "" && c.Election != nil && c.Election.Raft != nil {
+		out.OnPrimaryStop = c.Election.Raft.LeaderStopCommand
+	}
+	if strings.TrimSpace(out.OnPrimaryStart) == "" {
+		out.OnPrimaryStart = "nop"
+	}
+	if strings.TrimSpace(out.OnPrimaryStop) == "" {
+		out.OnPrimaryStop = "nop"
+	}
+	return out
 }

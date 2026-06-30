@@ -52,10 +52,10 @@ func NewElection(conf *config.Config, state raft.State, db *database.Database, d
 		dbType: dbType,
 	}
 
-	if conf.Election.Algo == "raft" {
+	if conf.EffectiveCoordination().Provider == "raft" {
 		election.etype = ElectionRaft
 		election.raft = raft.NewRaft(conf, log, db, dbType, state)
-	} else if conf.Election.Algo == "etcd" {
+	} else if conf.EffectiveCoordination().Provider == "etcd" {
 		election.etype = ElectionEtcd
 		// election.etcd = etcd.NewEtcd()
 	} else {
@@ -72,7 +72,7 @@ func (e *Election) Start() {
 			log.Panic("election.raft.start.error")
 		}
 	case ElectionEtcd:
-		// TODO: start etcd
+		// Leader election runs in coordination.Coordinator (server.setupHA / server.Start).
 	default:
 		log.Panic("unsupported election type")
 	}
@@ -83,10 +83,18 @@ func (e *Election) Stop() {
 	case ElectionRaft:
 		e.raft.Stop()
 	case ElectionEtcd:
-		// TODO: stop etcd
+		// Coordinator Stop is handled by server.Shutdown.
 	default:
 		log.Panic("unsupported election type")
 	}
+}
+
+// Provider returns the active coordination provider name.
+func (e *Election) Provider() string {
+	if e.conf == nil {
+		return ""
+	}
+	return e.conf.EffectiveCoordination().Provider
 }
 
 func (e *Election) GetRaft() *raft.Raft {

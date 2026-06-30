@@ -37,7 +37,6 @@ type Leader struct {
 	isDegradeToFollower bool
 
 	isReadOnly bool
-	isVipSet   bool
 
 	// Used to wait for the async job done.
 	wg sync.WaitGroup
@@ -191,26 +190,18 @@ func (r *Leader) Loop() {
 						r.DEBUG("MGR.running.ok[%v].is.greater.than.quorums[%v]", mgrCnt, r.getQuorums())
 						lessCmtHtAcks = 0
 
-						// set mysql to read/write
+						// writable primary accessibility hooks run in L3 reconciler (ha.primary_hooks).
 						if r.isReadOnly == true {
-							r.WARNING("mysql.SetReadWrite.prepare")
-							if err := r.mysql.SetReadWrite(); err == nil {
+							if r.DelegateDBApply() {
+								if r.isDelegatedPrimaryReady() {
+									r.isReadOnly = false
+								}
+							} else if err := r.enableReadWrite(); err == nil {
 								r.isReadOnly = false
 								r.WARNING("mysql.SetReadWrite.done")
 							} else {
 								r.ERROR("mysql.SetReadWrite.error[%v]", err)
 							}
-						}
-
-						if r.isVipSet == false {
-							r.WARNING("start.vip.prepare")
-							if err := r.leaderStartShellCommand(); err == nil {
-								r.WARNING("start.vip.done")
-							} else {
-								r.ERROR("leader.StartShellCommand.error[%v]", err)
-							}
-							// If the command fails, it will most likely continue to fail, therefore, run it only once.
-							r.isVipSet = true
 						}
 
 						// for brain split
@@ -481,26 +472,23 @@ func (r *Leader) processPingRequest(req *model.RaftRPCRequest) *model.RaftRPCRes
 }
 
 func (r *Leader) degradeToFollower() {
-	r.WARNING("degrade.to.follower.stop.the.vip...")
-	if err := r.leaderStopShellCommand(); err != nil {
-		r.ERROR("degrade.to.follower.stop.the.vip.error[%v]", err)
+	if r.DelegateDBApply() {
+		r.WARNING("degrade.to.follower.delegated.skip[reconciler owns demote and MGR stop]")
 	} else {
-		r.WARNING("degrade.to.follower.stop.the.vip.done")
-	}
-
-	r.WARNING("degrade.to.follower.SetReadOnly...")
-	if err := r.mysql.SetReadOnly(); err != nil {
-		r.ERROR("degrade.to.follower.SetReadOnly.error[%v]", err)
-	} else {
-		r.WARNING("degrade.to.follower.SetReadOnly.done")
-	}
-
-	if r.mysqlReplMode == model.ReplModeMGR {
-		r.WARNING("degrade.to.follower.stop.MGR...")
-		if err := r.mysql.StopMGR(); err != nil {
-			r.ERROR("degrade.to.follower.stop.MGR.error[%v]", err)
+		r.WARNING("degrade.to.follower.SetReadOnly...")
+		if err := r.demoteReadOnly(); err != nil {
+			r.ERROR("degrade.to.follower.SetReadOnly.error[%v]", err)
 		} else {
-			r.WARNING("degrade.to.follower.stop.MGR.done")
+			r.WARNING("degrade.to.follower.SetReadOnly.done")
+		}
+
+		if r.mysqlReplMode == model.ReplModeMGR {
+			r.WARNING("degrade.to.follower.stop.MGR...")
+			if err := r.mysql.StopMGR(); err != nil {
+				r.ERROR("degrade.to.follower.stop.MGR.error[%v]", err)
+			} else {
+				r.WARNING("degrade.to.follower.stop.MGR.done")
+			}
 		}
 	}
 	r.purgeBinlogStop()
@@ -526,6 +514,10 @@ func (r *Leader) checkChangeToMaster() bool {
 
 // prepareSettingsMGR
 func (r *Leader) prepareSettingsMGR() {
+	if r.delegateMGRApply() {
+		r.prepareSettingsMGRDelegated()
+		return
+	}
 	r.WARNING("MGR.setting.prepare....")
 
 	r.cmtState = CmtNone
@@ -562,8 +554,7 @@ func (r *Leader) prepareSettingsMGR() {
 			r.mgrClusterEverOK = true
 			r.WARNING("MGR.cluster.has.met.expectations.skip.change.to.master")
 		} else {
-			repl := r.mysql.GetRepl()
-			if err := r.mysql.ChangeToMaster(&repl); err != nil {
+			if err := r.changeToMaster(); err != nil {
 				r.cmtState = CmtError
 				r.ERROR("leader.change.to.master.failed")
 				r.degradeToFollower()
@@ -576,7 +567,7 @@ func (r *Leader) prepareSettingsMGR() {
 
 		// MySQL4. set mysql to read-only
 		r.WARNING("4. mysql.SetReadOnly.prepare")
-		if err := r.mysql.SetReadOnly(); err != nil {
+		if err := r.demoteReadOnly(); err != nil {
 			// WTF, what can we do?
 			r.ERROR("mysql.SetReadOnly.error[%v]", err)
 		} else {
@@ -587,11 +578,37 @@ func (r *Leader) prepareSettingsMGR() {
 	}()
 }
 
+func (r *Leader) prepareSettingsMGRDelegated() {
+	r.WARNING("MGR.setting.delegated.prepare....")
+	r.cmtState = CmtNone
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+		deadline := time.Now().Add(5 * time.Minute)
+		for time.Now().Before(deadline) {
+			if r.isDelegatedMGRPhase1Ready() {
+				r.cmtState = CmtOK
+				r.mgrClusterEverOK = true
+				r.isReadOnly = true
+				r.WARNING("MGR.setting.delegated.all.done....")
+				return
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		r.ERROR("delegated.mgr.phase1.timeout")
+		r.degradeToFollower()
+	}()
+}
+
 // prepareSettingsAsync
 // wait mysql WAIT_UNTIL_SQL_THREAD_AFTER_GTIDS done and other mysql settings
 // since leader must periodically send heartbeat to followers, so setMysqlAsync is asynchronous
 // WAIT_UNTIL_SQL_THREAD_AFTER_GTIDS maybe a long operation here
 func (r *Leader) prepareSettingsAsync() {
+	if r.delegateSemiSyncApply() {
+		r.prepareSettingsAsyncDelegated()
+		return
+	}
 	r.WARNING("async.setting.prepare....")
 
 	r.wg.Add(1)
@@ -619,8 +636,7 @@ func (r *Leader) prepareSettingsAsync() {
 
 		// MySQL2. change to master
 		r.WARNING("2. mysql.ChangeToMaster.prepare")
-		repl := r.mysql.GetRepl()
-		if err := r.mysql.ChangeToMaster(&repl); err != nil {
+		if err := r.changeToMaster(); err != nil {
 			r.ERROR("mysql.ChangeToMaster.error[%v]", err)
 			// TODO: Why not use r.degradeToFollower()
 			r.setState(FOLLOWER)
@@ -645,24 +661,17 @@ func (r *Leader) prepareSettingsAsync() {
 
 		// MySQL5. set mysql to read/write
 		r.WARNING("5. mysql.SetReadWrite.prepare")
-		if err := r.mysql.SetReadWrite(); err != nil {
+		if err := r.enableReadWrite(); err != nil {
 			// WTF, what can we do?
 			r.ERROR("mysql.SetReadWrite.error[%v]", err)
 		}
 		r.WARNING("mysql.SetReadWrite.done")
-		r.WARNING("6. start.vip.prepare")
-		if r.initRole == LEADER {
-			// The -r LEADER is specified at startup server, ndicates that the current node
-			// has previously executed leaderStartShellCommand，skip this one.
-			r.initRole = UNKNOWN
-			r.WARNING("the.init.role.is.leader.skip")
-		} else if err := r.leaderStartShellCommand(); err != nil {
-			// TODO(array): what todo?
-			r.ERROR("leader.StartShellCommand.error[%v]", err)
-		}
-		r.WARNING("start.vip.done")
 		r.WARNING("async.setting.all.done....")
 	}()
+}
+
+func (r *Leader) prepareSettingsAsyncDelegated() {
+	r.WARNING("async.setting.delegated.skip[reconciler owns db apply and primary hooks]")
 }
 
 func (r *Leader) purgeBinlogStart() {
@@ -841,7 +850,6 @@ func (r *Leader) stateInit() {
 	} else {
 		r.prepareSettingsMGR()
 	}
-	r.isVipSet = false
 	r.isDegradeToFollower = false
 
 	r.WARNING("state.machine.run")
@@ -849,18 +857,15 @@ func (r *Leader) stateInit() {
 
 func (r *Leader) stateExit() {
 	if !r.isDegradeToFollower {
-		r.WARNING("state.machine.exit.stop.the.vip...")
-		if err := r.leaderStopShellCommand(); err != nil {
-			r.ERROR("state.machine.exit.stop.the.vip.error[%v]", err)
+		if r.DelegateDBApply() {
+			r.WARNING("state.machine.exit.delegated.skip[reconciler owns demote]")
 		} else {
-			r.WARNING("state.machine.exit.stop.the.vip.done")
-		}
-
-		r.WARNING("state.machine.exit.SetReadOnly...")
-		if err := r.mysql.SetReadOnly(); err != nil {
-			r.ERROR("state.machine.exit.SetReadOnly.error[%v]", err)
-		} else {
-			r.WARNING("state.machine.exit.SetReadOnly.done")
+			r.WARNING("state.machine.exit.SetReadOnly...")
+			if err := r.demoteReadOnly(); err != nil {
+				r.ERROR("state.machine.exit.SetReadOnly.error[%v]", err)
+			} else {
+				r.WARNING("state.machine.exit.SetReadOnly.done")
+			}
 		}
 
 		r.purgeBinlogStop()

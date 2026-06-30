@@ -122,7 +122,7 @@ func (r *Idle) processHeartbeatRequest(req *model.RaftRPCRequest) *model.RaftRPC
 		}
 
 		// MySQL2: set mysql readonly(mysql maybe down and up then the LEADER changes)
-		if err := r.mysql.SetReadOnly(); err != nil {
+		if err := r.demoteReadOnly(); err != nil {
 			r.ERROR("mysql.SetReadOnly.error[%v]", err)
 		}
 
@@ -181,14 +181,8 @@ func (r *Idle) processRequestVoteRequest(req *model.RaftRPCRequest) *model.RaftR
 }
 
 func (r *Idle) stateInit() {
-	// 1. stop vip
-	if err := r.leaderStopShellCommand(); err != nil {
-		// TODO(array): what todo?
-		r.ERROR("stopshell.error[%v]", err)
-	}
-
 	// MySQL1: set readonly
-	if err := r.mysql.SetReadOnly(); err != nil {
+	if err := r.demoteReadOnly(); err != nil {
 		r.ERROR("mysql.SetReadOnly.error[%v]", err)
 	}
 

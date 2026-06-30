@@ -310,12 +310,10 @@ func (r *Candidate) processRequestVoteResponse(voteGranted *int, rsp *model.Raft
 		peers := r.getMembers()
 		r.WARNING("get.vote.response.from[N:%v, V:%v].error[ErrorMySQLDown].peers.number[%v]", rsp.GetFrom(), rsp.GetViewID(), peers)
 		// MGR lost quorum: dead peers cannot vote, but their ErrorMySQLDown responses
-		// should not block rebuilding the group on the surviving candidate.
+		// should count as grants so the GTID-max survivor can rebuild the group.
 		if r.mysqlReplMode == model.ReplModeMGR && r.mgrClusterEverOK {
-			if ok, _ := r.isMGRClusterStatusOK(); !ok {
-				*voteGranted++
-				return
-			}
+			*voteGranted++
+			return
 		}
 		// ReplMode is MGR:
 		// If the pees less than 3 and the Txns_Behind_Master is 0, we grant the vote though the mysql is down.

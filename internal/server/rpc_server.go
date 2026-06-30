@@ -54,8 +54,8 @@ func (s *ServerRPC) Status(req *model.ServerRPCRequest, rsp *model.ServerRPCResp
 		RaftHeartbeatTimeout:  s.server.conf.Election.Raft.HeartbeatTimeout,
 		RaftElectionTimeout:   s.server.conf.Election.Raft.ElectionTimeout,
 		RaftRPCRequestTimeout: s.server.conf.Election.Raft.RequestTimeout,
-		RaftStartVipCommand:   s.server.conf.Election.Raft.LeaderStartCommand,
-		RaftStopVipCommand:    s.server.conf.Election.Raft.LeaderStopCommand,
+		RaftStartVipCommand:   s.server.conf.EffectivePrimaryHooks().OnPrimaryStart,
+		RaftStopVipCommand:    s.server.conf.EffectivePrimaryHooks().OnPrimaryStop,
 	}
 	rsp.Config = config
 	rsp.Stats = s.server.getStats()

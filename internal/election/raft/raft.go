@@ -20,6 +20,7 @@ package raft
 
 import (
 	"github.com/sealdb/neoha/internal/database"
+	dbdriver "github.com/sealdb/neoha/internal/database/driver"
 	"github.com/sealdb/neoha/internal/database/postgresql"
 	"os"
 	"path/filepath"
@@ -63,6 +64,7 @@ type Raft struct {
 	conf *config.RaftConfig
 
 	dbType        database.DBType
+	dbDriver      dbdriver.Driver
 	mysql         *mysql.Mysql
 	mysqlReplMode model.MysqlReplMode
 	pg            *postgresql.Postgresql
@@ -98,6 +100,9 @@ type Raft struct {
 	isBrainSplit             bool   // if true, follower can upgrade to candidate
 	mgrClusterEverOK         bool   // true once MGR has reached quorum; used to distinguish bootstrap from quorum loss
 	gtid                     model.GTID
+	delegateDBApply          bool // when true, L3 reconciler owns demote + semi-sync DB apply
+	leaderDBHost             string
+	leaderDBPort             int
 }
 
 // NewRaft creates the new raft.
@@ -109,6 +114,7 @@ func NewRaft(conf *config.Config, log *nlog.Log, db *database.Database,
 		log:                      log,
 		cmd:                      common.NewLinuxCommand(log),
 		dbType:                   dbType,
+		dbDriver:                 db.Driver(),
 		mysql:                    db.GetMysql(),
 		mysqlReplMode:            conf.Database.Mysql.ReplMode,
 		pg:                       db.GetPostgreSQL(),
@@ -120,6 +126,9 @@ func NewRaft(conf *config.Config, log *nlog.Log, db *database.Database,
 		idlePeers:                make(map[string]*Peer),
 		skipCheckSemiSync:        false,
 		semiSyncTimeoutFor2Nodes: conf.Database.Mysql.SemiSyncTimeoutForTwoNodes,
+	}
+	if conf.HA != nil {
+		r.delegateDBApply = conf.HA.DelegateDBApply
 	}
 
 	// state handler
@@ -425,7 +434,7 @@ func (r *Raft) SetSkipCheckSemiSync(v bool) {
 // replicationPromotable reports whether MySQL replication state allows candidacy
 // (alive, GTID readable, SQL thread / MGR lag). Used for follower timeout elections.
 func (r *Raft) replicationPromotable() bool {
-	return r.mysql.Promotable()
+	return r.driverPromotable()
 }
 
 // Promotable reports whether this node may become a CANDIDATE for manual promotion

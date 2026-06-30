@@ -1,0 +1,47 @@
+# PostgreSQL + etcd 示例（单节点 agent 配置骨架）
+# 需外置 etcd 与已初始化的 PostgreSQL 实例；见 docs/config-design.md
+
+scope: neoha-pg
+namespace: /service/
+name: pg-node1
+
+# NeoHA RPC（nrpc）
+endpoint: 127.0.0.1:8080
+
+log:
+    level: INFO
+
+coordination:
+    # 外置 DCS：etcd（Patroni 风格 leader lease）
+    provider: etcd
+    etcd:
+        host: 127.0.0.1:2379
+        ttl: 30
+
+database:
+    type: postgresql
+    postgresql:
+        version: postgresql14
+        listen: 127.0.0.1:5432
+        connect_address: 127.0.0.1:5432
+        data_dir: /var/lib/postgresql/14/main
+        use_slots: true
+        primary_slot_name: pg-node1
+        maximum_lag_on_failover: 1048576
+        authentication:
+            replication:
+                username: replicator
+                password: repl-pass
+            superuser:
+                username: postgres
+                password: postgres
+
+ha:
+    reconcile_interval: 3
+    delegate_db_apply: true
+    primary_hooks:
+        on_primary_start: nop
+        on_primary_stop: nop
+
+tags:
+    nofailover: false

@@ -248,6 +248,13 @@ func TestMGRChangeToMaster(t *testing.T) {
 	mysql := NewMysql(conf, 10000, log)
 	mysql.db = db
 
+	mgrStatsQuery := "SELECT MEMBER_ID,MEMBER_HOST,MEMBER_STATE FROM performance_schema.replication_group_members"
+	mock.ExpectQuery(mgrStatsQuery).WillReturnRows(
+		sqlmock.NewRows([]string{"MEMBER_ID", "MEMBER_HOST", "MEMBER_STATE"}).
+			AddRow("uuid1", "127.0.0.1", model.MGRStateOnline).
+			AddRow("uuid2", "127.0.0.1", model.MGRStateOnline),
+	)
+
 	queryList := []string{"STOP GROUP_REPLICATION",
 		`CHANGE MASTER TO MASTER_USER = 'repl', MASTER_PASSWORD = 'repl' FOR CHANNEL 'group_replication_recovery'`,
 		"SET GLOBAL group_replication_bootstrap_group=ON",

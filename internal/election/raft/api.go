@@ -228,6 +228,33 @@ func (r *Raft) GetState() State {
 	return r.state
 }
 
+// RecordLeaderDatabase caches the primary database endpoint from a heartbeat repl payload.
+func (r *Raft) RecordLeaderDatabase(repl *model.Repl) {
+	if repl == nil || repl.Master_Host == "" || repl.Master_Port <= 0 {
+		return
+	}
+	r.mutex.Lock()
+	r.leaderDBHost = repl.Master_Host
+	r.leaderDBPort = repl.Master_Port
+	r.mutex.Unlock()
+}
+
+// GetLeaderDatabaseEndpoint returns host/port for replication to the current Raft leader.
+func (r *Raft) GetLeaderDatabaseEndpoint() (string, int) {
+	r.mutex.RLock()
+	host, port := r.leaderDBHost, r.leaderDBPort
+	state := r.state
+	r.mutex.RUnlock()
+	if host != "" && port > 0 {
+		return host, port
+	}
+	if state == LEADER && r.mysql != nil {
+		repl := r.mysql.GetRepl()
+		return repl.Master_Host, repl.Master_Port
+	}
+	return "", 0
+}
+
 // GetRaftRPC returns RaftRPC.
 func (r *Raft) GetRaftRPC() *RaftRPC {
 	return &RaftRPC{r}

@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 const (
@@ -42,11 +43,22 @@ type Backend interface {
 	Ready(ctx context.Context, node *Node) error
 }
 
+// DatadirChecker optionally reports whether a node's data directory is initialized.
+type DatadirChecker interface {
+	NodeDatadirReady(node *Node) bool
+}
+
+const readyPollInterval = 150 * time.Millisecond
+
+// ReadyPollInterval is the poll interval used by harness readiness loops.
+func ReadyPollInterval() time.Duration { return readyPollInterval }
+
 // Node is one database (+ optional NeoHA agent) in a test cluster.
 type Node struct {
 	Name     string
 	Port     int
 	GRPort   int // group_replication local address port (MySQL MGR)
+	GRSeeds  string // group_replication_group_seeds for this cluster
 	DataDir  string
 	Config   string // path to my.cnf or postgresql.conf
 	Socket   string
@@ -93,6 +105,14 @@ func (c *Cluster) Setup(ctx context.Context) error {
 	return c.SetupFresh(ctx, true)
 }
 
+// SetupReset stops stale processes, removes the workdir, and re-initializes all nodes.
+// Use for tests that leave MGR/replication in a state unsafe to reuse (e.g. majority loss).
+func (c *Cluster) SetupReset(ctx context.Context) error {
+	KillProcessesOnWorkDir(c.WorkDir)
+	_ = os.RemoveAll(c.WorkDir)
+	return c.SetupFresh(ctx, false)
+}
+
 // SetupFresh initializes nodes; when clean is true, stale processes are stopped and
 // the workdir is removed only if datadirs are missing or incomplete.
 func (c *Cluster) SetupFresh(ctx context.Context, clean bool) error {
@@ -105,9 +125,11 @@ func (c *Cluster) SetupFresh(ctx context.Context, clean bool) error {
 	if err := os.MkdirAll(c.WorkDir, 0o755); err != nil {
 		return err
 	}
+	grSeeds := c.mgrGroupSeeds()
 	var wg sync.WaitGroup
 	errCh := make(chan error, len(c.Nodes))
 	for _, node := range c.Nodes {
+		node.GRSeeds = grSeeds
 		wg.Add(1)
 		go func(n *Node) {
 			defer wg.Done()
@@ -130,7 +152,14 @@ func (c *Cluster) datadirsReady() bool {
 	if len(c.Nodes) == 0 {
 		return false
 	}
+	checker, ok := c.Backend.(DatadirChecker)
 	for _, node := range c.Nodes {
+		if ok {
+			if !checker.NodeDatadirReady(node) {
+				return false
+			}
+			continue
+		}
 		mysqlDir := filepath.Join(c.WorkDir, node.Name, "data", "mysql")
 		if _, err := os.Stat(mysqlDir); err != nil {
 			return false
@@ -139,14 +168,47 @@ func (c *Cluster) datadirsReady() bool {
 	return true
 }
 
-// StartAll starts every node and waits until ready.
-func (c *Cluster) StartAll(ctx context.Context) error {
-	for _, node := range c.Nodes {
-		if err := node.backend.StartNode(ctx, node); err != nil {
-			return fmt.Errorf("start node %s: %w", node.Name, err)
+func (c *Cluster) mgrGroupSeeds() string {
+	var ports []int
+	for _, n := range c.Nodes {
+		if n.GRPort > 0 {
+			ports = append(ports, n.GRPort)
 		}
-		if err := node.backend.Ready(ctx, node); err != nil {
-			return fmt.Errorf("ready node %s: %w", node.Name, err)
+	}
+	if len(ports) == 0 {
+		return "127.0.0.1:13361,127.0.0.1:13362,127.0.0.1:13363"
+	}
+	return FormatGRSeeds(ports)
+}
+
+// StartAll starts every node in parallel and waits until ready.
+func (c *Cluster) StartAll(ctx context.Context) error {
+	type result struct {
+		name string
+		err  error
+	}
+	ch := make(chan result, len(c.Nodes))
+	var wg sync.WaitGroup
+	for _, node := range c.Nodes {
+		wg.Add(1)
+		go func(n *Node) {
+			defer wg.Done()
+			if err := n.backend.StartNode(ctx, n); err != nil {
+				ch <- result{n.Name, fmt.Errorf("start node %s: %w", n.Name, err)}
+				return
+			}
+			if err := n.backend.Ready(ctx, n); err != nil {
+				ch <- result{n.Name, fmt.Errorf("ready node %s: %w", n.Name, err)}
+				return
+			}
+			ch <- result{n.Name, nil}
+		}(node)
+	}
+	wg.Wait()
+	close(ch)
+	for r := range ch {
+		if r.err != nil {
+			return r.err
 		}
 	}
 	return nil

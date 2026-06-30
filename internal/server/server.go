@@ -19,6 +19,7 @@
 package server
 
 import (
+	"context"
 	"os"
 	"os/signal"
 	"runtime"
@@ -28,10 +29,13 @@ import (
 	"github.com/sealdb/neoha/internal/base/nlog"
 	"github.com/sealdb/neoha/internal/base/nrpc"
 	"github.com/sealdb/neoha/internal/config"
+	"github.com/sealdb/neoha/internal/coordination"
+	"github.com/sealdb/neoha/internal/coordination/wire"
 	"github.com/sealdb/neoha/internal/database"
 	"github.com/sealdb/neoha/internal/database/mysql"
 	"github.com/sealdb/neoha/internal/election"
 	"github.com/sealdb/neoha/internal/election/raft"
+	"github.com/sealdb/neoha/internal/ha"
 	"github.com/sealdb/neoha/internal/manager"
 	"github.com/sealdb/neoha/internal/manager/mysqld"
 )
@@ -59,21 +63,26 @@ const (
 )
 
 type Server struct {
-	log      *nlog.Log
-	conf     *config.Config
-	election *election.Election
-	db       *database.Database
-	manager  *manager.Manager
-	rpc      *nrpc.Service
-	rpcs     RPCS
-	begin    time.Time
+	log        *nlog.Log
+	conf       *config.Config
+	election   *election.Election
+	coord      coordination.Coordinator
+	reconciler *ha.Reconciler
+	haCancel   context.CancelFunc
+	initState  ServerState
+	db         *database.Database
+	manager    *manager.Manager
+	rpc        *nrpc.Service
+	rpcs       RPCS
+	begin      time.Time
 }
 
 func NewServer(conf *config.Config, log *nlog.Log, state ServerState) *Server {
 	s := &Server{
-		log:  log,
-		conf: conf,
-		db:   nil,
+		log:       log,
+		conf:      conf,
+		initState: state,
+		db:        nil,
 	}
 
 	dbType := database.MySQL
@@ -113,6 +122,37 @@ func (s *Server) Init() {
 	s.manager.SetupManager()
 	s.db.SetupDB()
 	s.setupRPC()
+	s.setupHA()
+}
+
+func (s *Server) setupHA() {
+	var raftInst *raft.Raft
+	if s.election != nil {
+		raftInst = s.election.GetRaft()
+	}
+	coord, err := wire.NewCoordinator(s.conf, raftInst)
+	if err != nil {
+		s.log.Warning("server.coordination.setup.skipped[%v]", err)
+		return
+	}
+	s.coord = coord
+	hooks := ha.NewPrimaryHooks(s.log, s.conf.EffectivePrimaryHooks())
+	if s.initState == ServerLeader {
+		hooks.SetSkipPrimaryStartOnce()
+	}
+	opts := []ha.Option{ha.WithPrimaryHooks(hooks)}
+	if s.conf.HA != nil {
+		if s.conf.HA.ReconcileInterval > 0 {
+			opts = append(opts, ha.WithInterval(time.Duration(s.conf.HA.ReconcileInterval)*time.Second))
+		}
+		if s.conf.HA.DelegateDBApply {
+			opts = append(opts, ha.WithApplyPromote(true))
+		}
+	}
+	if s.conf.Database != nil && s.conf.Database.Mysql != nil {
+		opts = append(opts, ha.WithMySQLPort(s.conf.Database.Mysql.Port))
+	}
+	s.reconciler = ha.NewReconciler(s.log, coord, s.db.Driver(), s.conf.Tags, opts...)
 }
 
 // setupRPC used to setup rpc handlers
@@ -122,11 +162,17 @@ func (s *Server) setupRPC() {
 	s.rpcs.NodeRPC = s.GetNodeRPC()
 	s.rpcs.ServerRPC = s.GetServerRPC()
 	s.rpcs.UserRPC = s.GetUserRPC()
-	s.rpcs.RaftRPC = s.election.GetRaft().GetRaftRPC()
-	s.rpcs.HARPC = s.election.GetRaft().GetHARPC()
-	s.rpcs.MysqldRPC = s.manager.GetMysqld().GetMysqldRPC()
-	s.rpcs.BackupRPC = s.manager.GetMysqld().GetBackupRPC()
-	s.rpcs.MysqlRPC = s.db.GetMysql().GetMysqlRPC()
+	if raftInst := s.election.GetRaft(); raftInst != nil {
+		s.rpcs.RaftRPC = raftInst.GetRaftRPC()
+		s.rpcs.HARPC = raftInst.GetHARPC()
+	}
+	if mysqld := s.manager.GetMysqld(); mysqld != nil {
+		s.rpcs.MysqldRPC = mysqld.GetMysqldRPC()
+		s.rpcs.BackupRPC = mysqld.GetBackupRPC()
+	}
+	if mysql := s.db.GetMysql(); mysql != nil {
+		s.rpcs.MysqlRPC = mysql.GetMysqlRPC()
+	}
 
 	if err := s.rpc.RegisterService(s.rpcs.NodeRPC); err != nil {
 		log.Panic("server.rpc.RegisterService.NodeRPC.error[%+v]", err)
@@ -137,20 +183,30 @@ func (s *Server) setupRPC() {
 	if err := s.rpc.RegisterService(s.rpcs.UserRPC); err != nil {
 		log.Panic("server.rpc.RegisterService.UserRPC.error[%+v]", err)
 	}
-	if err := s.rpc.RegisterService(s.rpcs.HARPC); err != nil {
-		log.Panic("server.rpc.RegisterService.HARPC.error[%+v]", err)
+	if s.rpcs.HARPC != nil {
+		if err := s.rpc.RegisterService(s.rpcs.HARPC); err != nil {
+			log.Panic("server.rpc.RegisterService.HARPC.error[%+v]", err)
+		}
 	}
-	if err := s.rpc.RegisterService(s.rpcs.RaftRPC); err != nil {
-		log.Panic("server.rpc.RegisterService.RaftRPC.error[%+v]", err)
+	if s.rpcs.RaftRPC != nil {
+		if err := s.rpc.RegisterService(s.rpcs.RaftRPC); err != nil {
+			log.Panic("server.rpc.RegisterService.RaftRPC.error[%+v]", err)
+		}
 	}
-	if err := s.rpc.RegisterService(s.rpcs.MysqldRPC); err != nil {
-		log.Panic("server.rpc.RegisterService.MysqldRPC.error[%+v]", err)
+	if s.rpcs.MysqldRPC != nil {
+		if err := s.rpc.RegisterService(s.rpcs.MysqldRPC); err != nil {
+			log.Panic("server.rpc.RegisterService.MysqldRPC.error[%+v]", err)
+		}
 	}
-	if err := s.rpc.RegisterService(s.rpcs.BackupRPC); err != nil {
-		log.Panic("server.rpc.RegisterService.BackupRPC.error[%+v]", err)
+	if s.rpcs.BackupRPC != nil {
+		if err := s.rpc.RegisterService(s.rpcs.BackupRPC); err != nil {
+			log.Panic("server.rpc.RegisterService.BackupRPC.error[%+v]", err)
+		}
 	}
-	if err := s.rpc.RegisterService(s.rpcs.MysqlRPC); err != nil {
-		log.Panic("server.rpc.RegisterService.MysqlRPC.error[%+v]", err)
+	if s.rpcs.MysqlRPC != nil {
+		if err := s.rpc.RegisterService(s.rpcs.MysqlRPC); err != nil {
+			log.Panic("server.rpc.RegisterService.MysqlRPC.error[%+v]", err)
+		}
 	}
 	log.Info("server.RPC.setup.done")
 }
@@ -167,8 +223,18 @@ func (s *Server) Start() {
 	}()
 
 	s.manager.Start()
-	s.db.GetMysql().PingStart()
+	s.db.Start()
 	s.election.Start()
+	if s.coord != nil {
+		if err := s.coord.Start(context.Background()); err != nil {
+			s.log.Warning("server.coordination.start.error[%v]", err)
+		}
+	}
+	if s.reconciler != nil {
+		ctx, cancel := context.WithCancel(context.Background())
+		s.haCancel = cancel
+		go s.reconciler.Loop(ctx)
+	}
 	if err := s.rpc.Start(); err != nil {
 		log.Panic("server.rpc.start.error[%+v]", err)
 	}
@@ -183,6 +249,12 @@ func (s *Server) updateUptime() {
 
 func (s *Server) Shutdown() {
 	s.log.Info("server.prepare.to.shutdown")
+	if s.haCancel != nil {
+		s.haCancel()
+	}
+	if s.coord != nil {
+		_ = s.coord.Stop()
+	}
 	s.rpc.Stop()
 	s.election.Stop()
 	s.db.Stop()

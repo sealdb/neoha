@@ -321,17 +321,22 @@ func testRaftLeaderLocalCommit(t *testing.T, replMode model.MysqlReplMode) {
 	//    remock leader to localcommit
 
 	{
+		imoldleader := whoisleader
 		leader.Stop()
 
-		MockWaitLeaderEggs(rafts, 1, replMode, false, -1)
-		got = 0
-		want = (LEADER + FOLLOWER + STOPPED)
-		for _, raft := range rafts {
-			got += raft.getState()
+		if replMode == model.ReplModeMGR {
+			MockResetMGRHandlers(rafts)
 		}
+		MockWaitLeaderEggs(rafts, 1, replMode, false, imoldleader)
 
-		// [LEADER, FOLLOWER, STOPPED]
-		assert.Equal(t, want, got)
+		want = (LEADER + FOLLOWER + STOPPED)
+		assert.True(t, MockWaitUntil(15*time.Second, 50*time.Millisecond, func() bool {
+			got = 0
+			for _, raft := range rafts {
+				got += raft.getState()
+			}
+			return got == want
+		}), "expected [LEADER, FOLLOWER, STOPPED] after old leader stopped, got %v", got)
 
 		got = 0
 		if replMode == model.ReplModeSemiSync {
@@ -341,19 +346,26 @@ func testRaftLeaderLocalCommit(t *testing.T, replMode model.MysqlReplMode) {
 		}
 		leader.Start()
 
-		MockWaitHeartBeatTimeout()
-		// TODO: mgr has local commit ?
 		if replMode == model.ReplModeSemiSync {
 			want = (LEADER + FOLLOWER + INVALID)
+			MockWaitHeartBeatTimeout()
+			for _, raft := range rafts {
+				got += raft.getState()
+			}
+			// [LEADER, FOLLOWER, INVALID]
+			assert.Equal(t, want, got)
 		} else {
 			want = (LEADER + FOLLOWER + FOLLOWER)
+			MockResetMGRHandlers(rafts)
+			MockWaitLeaderEggs(rafts, 1, replMode, true, -1)
+			assert.True(t, MockWaitUntil(15*time.Second, 50*time.Millisecond, func() bool {
+				got = 0
+				for _, raft := range rafts {
+					got += raft.getState()
+				}
+				return got == want
+			}), "expected [LEADER, FOLLOWER, FOLLOWER] after local-commit node rejoined, got %v", got)
 		}
-		for _, raft := range rafts {
-			got += raft.getState()
-		}
-
-		// [LEADER, FOLLOWER, INVALID]
-		assert.Equal(t, want, got)
 	}
 }
 
@@ -1200,6 +1212,10 @@ func testRaftInitRoleIsFollower(t *testing.T, replMode model.MysqlReplMode) {
 	// 9. check if the LEADER is the same node
 	{
 		want := LEADER
+		stillLeader := MockWaitUntil(15*time.Second, 200*time.Millisecond, func() bool {
+			return rafts[whoisleader].getState() == want
+		})
+		assert.True(t, stillLeader, "rafts[%d] should remain LEADER after adding peer", whoisleader)
 		got := rafts[whoisleader].getState()
 		assert.Equal(t, want, got)
 	}
@@ -2208,21 +2224,33 @@ func testRaftElectionUnderLearnerInMinority(t *testing.T, replMode model.MysqlRe
 	var whoisleader int
 	{
 		var got State
-		MockWaitLeaderEggs(rafts, 1, replMode, false, -1)
 		want := (LEADER + FOLLOWER + FOLLOWER)
-		for i, raft := range rafts {
-			got += raft.getState()
-			if raft.getState() == LEADER {
-				whoisleader = i
+		found := MockWaitUntil(15*time.Second, 200*time.Millisecond, func() bool {
+			rafts[0].mysql.SetMysqlHandler(mysql.NewMockGTIDX1())
+			rafts[1].mysql.SetMysqlHandler(mysql.NewMockGTIDX3())
+			rafts[2].mysql.SetMysqlHandler(mysql.NewMockGTIDX5())
+			MockWaitLeaderEggs(rafts, 1, replMode, false, -1)
+			got = 0
+			whoisleader = -1
+			for i, raft := range rafts {
+				got += raft.getState()
+				if raft.getState() == LEADER {
+					whoisleader = i
+				}
 			}
-		}
+			return whoisleader == 2 && got == want
+		})
+		assert.True(t, found, "rafts[2] should become leader")
 		assert.Equal(t, want, got)
-		assert.Equal(t, whoisleader, 2)
+		assert.Equal(t, 2, whoisleader)
 	}
 
 	// 4. set rafts[0] to LEARNER and demote the current leader to FOLLOWER
 	if replMode == model.ReplModeMGR {
 		MockUseSimpleMGRHandlers(rafts)
+		// Keep GTID ordering on voting members so rafts[2] remains the leader.
+		rafts[1].mysql.SetMysqlHandler(mysql.NewMockGTIDX3())
+		rafts[2].mysql.SetMysqlHandler(mysql.NewMockGTIDX5())
 	}
 	MockStateTransition(rafts[whoisleader], FOLLOWER)
 	MockStateTransition(rafts[0], LEARNER)
@@ -2230,21 +2258,31 @@ func testRaftElectionUnderLearnerInMinority(t *testing.T, replMode model.MysqlRe
 	// 5. wait a few election cycles, the leader remains the same
 	{
 		var got State
-		if replMode == model.ReplModeMGR {
-			MockStateTransition(rafts[whoisleader], CANDIDATE)
-			MockWaitLeaderEggs(rafts, 1, replMode, false, 0)
-		} else {
-			time.Sleep(time.Millisecond * 3000)
-		}
 		want := (LEADER + FOLLOWER + LEARNER)
-		for i, raft := range rafts {
-			got += raft.getState()
-			if raft.getState() == LEADER {
-				whoisleader = i
+		found := MockWaitUntil(15*time.Second, 200*time.Millisecond, func() bool {
+			if replMode == model.ReplModeMGR {
+				MockStateTransition(rafts[whoisleader], CANDIDATE)
+				MockWaitLeaderEggs(rafts, 1, replMode, false, 0)
+			} else {
+				time.Sleep(time.Millisecond * 3000)
 			}
-		}
+			got = 0
+			leaderIdx := -1
+			for i, raft := range rafts {
+				got += raft.getState()
+				if raft.getState() == LEADER {
+					leaderIdx = i
+				}
+			}
+			if leaderIdx == 2 && got == want {
+				whoisleader = leaderIdx
+				return true
+			}
+			return false
+		})
+		assert.True(t, found, "leader should remain rafts[2]")
 		assert.Equal(t, want, got)
-		assert.Equal(t, whoisleader, 2)
+		assert.Equal(t, 2, whoisleader)
 	}
 }
 

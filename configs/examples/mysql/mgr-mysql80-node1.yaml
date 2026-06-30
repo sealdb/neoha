@@ -1,12 +1,33 @@
-# NeoHA + MySQL 8.0 MGR — node 1 (bootstrap primary candidate)
-# Adjust ports, paths, and peer-address for your environment.
-scope: neoha
+# NeoHA + MySQL 8.0 MGR — node1（集成测试 / 三节点集群中的第一台）
+# 请按环境修改端口、路径与 peer-address
+
+scope: neoha                    # 逻辑集群名
 namespace: /service/
-name: mgr-node1
-endpoint: 127.0.0.1:18081
-peer-address: 127.0.0.1:18081
+name: mgr-node1                 # 本成员名（node2/3 需不同 name）
+endpoint: 127.0.0.1:18081       # 本节点 NeoHA RPC；各节点 port 不同
+peer-address: 127.0.0.1:18081   # REST 监听（可与 endpoint 相同）
+
 election:
     algorithm: raft
+    raft:
+        meta-datadir: /tmp/neoha-it/mgr/node1/meta  # 本节点 Raft 元数据目录
+        heartbeat-timeout: 1000
+        admit-defeat-hearbeat-count: 10
+        election-timeout: 3000
+        purge-binlog-interval: 300000
+        super-idle: false
+        leader-start-command: nop   # legacy → ha.primary_hooks
+        leader-stop-command: nop
+        purge-binlog-disabled: true # MGR 场景通常关闭 NeoHA 自动 purge
+        requesttimeout: 1000
+        candidate-wait-for-2nodes: 60000
+    etcd:
+        host: ""
+        hosts: []
+        use_proxies: false
+
+coordination:
+    provider: raft
     raft:
         meta-datadir: /tmp/neoha-it/mgr/node1/meta
         heartbeat-timeout: 1000
@@ -19,23 +40,38 @@ election:
         purge-binlog-disabled: true
         requesttimeout: 1000
         candidate-wait-for-2nodes: 60000
+    etcd:
+        host: ""
+        hosts: []
+        use_proxies: false
+
 database:
     type: mysql
     mysql:
         admin: root
         passwd: ""
         host: 127.0.0.1
-        port: 13306
+        port: 13306                 # 本节点 mysqld 端口
         basedir: /home/wslu/work/mysql/mysql80-debug
         version: mysql80
         defaults-file: /tmp/neoha-it/mgr/node1/my.cnf
         replication-mode: group-replication
         ping-timeout: 1000
         admit-defeat-ping-count: 2
+        # 升主时 SET GLOBAL（MGR group name 等）
         master-sysvars: "group_replication_group_name='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'"
+        # 从库/MGR 成员 bootstrap 变量（local_address/seeds 每节点不同）
         slave-sysvars: "group_replication_group_name='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';group_replication_local_address='127.0.0.1:13361';group_replication_group_seeds='127.0.0.1:13361,127.0.0.1:13362,127.0.0.1:13363'"
         repl-host: 127.0.0.1
         repl-user: repl
         repl-passwd: repl
+
+ha:
+    reconcile_interval: 3
+    delegate_db_apply: false
+    primary_hooks:
+        on_primary_start: nop
+        on_primary_stop: nop
+
 log:
     level: INFO

@@ -32,89 +32,186 @@ import (
 
 var (
 	neohaRaftPorts1 = []int{18081, 18082, 18083}
-	neohaRaftPorts2 = []int{18091, 18092, 18093}
 	neohaRaftPorts3 = []int{18101, 18102, 18103}
 )
 
-// TestNeoHA3NodeMGR forms MGR via NeoHA setupMysql + Raft leader (production path).
-func TestNeoHA3NodeMGR(t *testing.T) {
-	cluster, backend, ctx, _ := newMySQLCluster(t, "neoha3")
-	neoNodes, endpoints := startNeoHACluster(t, ctx, cluster, neohaRaftPorts1, writeMGRConfig)
+// TestNeoHAMGRWarmSuite boots one warm 3-node MGR cluster and reuses it for formation
+// verification and minority failover (failover subtest measures only the fault segment).
+func TestNeoHAMGRWarmSuite(t *testing.T) {
+	warm := bootstrapWarmNeoHA(t,
+		newWarmMySQLCluster(t, warmMGRClusterName, mgrMySQLPorts, mgrGRPorts, false, false),
+		neohaRaftPorts1,
+		writeMGRConfig,
+		neoHAStartOpts{skipCLIWire: true},
+	)
+	waitMGRFormation(t, warm)
 
-	t.Log("neoha: wait raft leader")
-	leader, err := harness.WaitRaftLeader(ctx, endpoints)
-	assert.NoError(t, err)
-	assert.NotEmpty(t, leader)
+	t.Run("3NodeMGR", func(t *testing.T) {
+		start := time.Now()
+		leader, err := harness.WaitRaftLeader(warm.ctx, warm.endpoints)
+		assert.NoError(t, err)
+		assert.NotEmpty(t, leader)
 
-	t.Log("neoha: wait MGR 3 ONLINE (via setupMysql on each agent)")
-	assert.NoError(t, backend.WaitMGROnlineMembers(ctx, cluster.Nodes[0], 3))
+		cnt, err := warm.backend.OnlineMGRMembers(warm.cluster.Nodes[0])
+		assert.NoError(t, err)
+		assert.Equal(t, 3, cnt)
+		t.Logf("timing: formation verify %s", time.Since(start))
+	})
 
-	cnt, err := backend.OnlineMGRMembers(cluster.Nodes[0])
-	assert.NoError(t, err)
-	assert.Equal(t, 3, cnt)
-	_ = neoNodes
+	t.Run("FailoverMinority", func(t *testing.T) {
+		start := time.Now()
+
+		primaryNode, err := warm.backend.FindMGRPrimaryNode(warm.cluster.Nodes)
+		assert.NoError(t, err)
+		if !assert.NotNil(t, primaryNode, "MGR PRIMARY must exist before failover") {
+			return
+		}
+
+		stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		t.Logf("failover: stop MGR primary mysqld (%s port %d)", primaryNode.Name, primaryNode.Port)
+		assert.NoError(t, warm.backend.StopNode(stopCtx, primaryNode))
+
+		remain := survivors(warm.cluster.Nodes, primaryNode)
+		failoverCtx, failoverCancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer failoverCancel()
+		newPrimary, err := warm.backend.WaitMGRPrimaryOnAny(failoverCtx, remain)
+		if !assert.NoError(t, err) {
+			return
+		}
+		if !assert.NotNil(t, newPrimary) {
+			return
+		}
+		assert.Equal(t, "PRIMARY", mustRole(t, warm.backend, newPrimary))
+		assert.NotEqual(t, primaryNode.Name, newPrimary.Name, "MGR should elect a new PRIMARY on a survivor")
+
+		assert.NoError(t, warm.backend.WaitMGROnlineMembers(failoverCtx, newPrimary, 2))
+		t.Logf("timing: failover segment %s (old=%s new=%s)", time.Since(start), primaryNode.Name, newPrimary.Name)
+	})
 }
 
-// TestNeoHAMGRFailoverMinority: 1 mysqld down, 2 survivors — MGR auto-elects PRIMARY; NeoHA waits.
-func TestNeoHAMGRFailoverMinority(t *testing.T) {
-	cluster, backend, ctx, _ := newMySQLCluster(t, "neoha-failover-minor")
-	_, _ = startNeoHACluster(t, ctx, cluster, neohaRaftPorts2, writeMGRConfig)
-
-	assert.NoError(t, backend.WaitMGROnlineMembers(ctx, cluster.Nodes[0], 3))
-
-	primaryNode, err := backend.FindMGRPrimaryNode(cluster.Nodes)
-	assert.NoError(t, err)
-
-	stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	t.Logf("failover: stop MGR primary mysqld (%s port %d)", primaryNode.Name, primaryNode.Port)
-	assert.NoError(t, backend.StopNode(stopCtx, primaryNode))
-
-	remain := survivors(cluster.Nodes, primaryNode)
-	newPrimary, err := backend.WaitMGRPrimaryOnAny(ctx, remain)
-	assert.NoError(t, err)
-	assert.Equal(t, "PRIMARY", mustRole(t, backend, newPrimary))
-	assert.NotEqual(t, primaryNode.Name, newPrimary.Name, "MGR should elect a new PRIMARY on a survivor")
-
-	// MGR still has majority (2/3); NeoHA waits for MGR, no forced Raft re-election.
-	assert.NoError(t, backend.WaitMGROnlineMembers(ctx, newPrimary, 2))
-	t.Logf("mgr auto-failover: old primary=%s new primary=%s", primaryNode.Name, newPrimary.Name)
-}
-
-// TestNeoHAMGRFailoverMajorityLoss: 2 mysqld down, 1 survivor — MGR cannot quorum; NeoHA elects and bootstraps.
+// TestNeoHAMGRFailoverMajorityLoss: 2 mysqld down, 1 survivor — MGR cannot quorum;
+// NeoHA Raft elects GTID-max survivor, force-bootstraps read-only PRIMARY, then opens
+// writes only after enough members rejoin (2+ ONLINE).
 func TestNeoHAMGRFailoverMajorityLoss(t *testing.T) {
-	cluster, backend, ctx, _ := newMySQLCluster(t, "neoha-failover-major")
-	neoNodes, _ := startNeoHACluster(t, ctx, cluster, neohaRaftPorts3, writeMGRConfig)
+	warm := bootstrapWarmNeoHA(t,
+		newWarmMySQLCluster(t, warmMGRMajorClusterName, mgrMajorMySQLPorts, mgrMajorGRPorts, false, true),
+		neohaRaftPorts3,
+		writeMGRMajorConfig,
+		neoHAStartOpts{skipCLIWire: true},
+	)
+	waitMGRFormation(t, warm)
 
-	assert.NoError(t, backend.WaitMGROnlineMembers(ctx, cluster.Nodes[0], 3))
+	survivor := warm.cluster.Nodes[2]
+	down := []*harness.Node{warm.cluster.Nodes[0], warm.cluster.Nodes[1]}
 
-	survivor := cluster.Nodes[2]
-	down := []*harness.Node{cluster.Nodes[0], cluster.Nodes[1]}
+	phase1OK := t.Run("SoleSurvivorBootstrap", func(t *testing.T) {
+		start := time.Now()
+		stopMajorityLossMysqld(t, warm, down)
+		waitSurvivorRaftLeader(t, warm, survivor)
 
+		t.Log("failover: wait MGR PRIMARY on survivor (read-only until quorum returns)")
+		mgrCtx, mgrCancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer mgrCancel()
+		_, err := warm.backend.WaitMGRPrimaryOnAny(mgrCtx, []*harness.Node{survivor})
+		if !assert.NoError(t, err) {
+			for _, na := range warm.neoNodes {
+				t.Logf("neoha log %s:\n%s", na.Name, na.TailNeoHALog(12000))
+			}
+			return
+		}
+		assert.Equal(t, "PRIMARY", mustRole(t, warm.backend, survivor))
+
+		ro, err := warm.backend.MySQLReadOnly(survivor)
+		assert.NoError(t, err)
+		assert.True(t, ro, "sole-survivor PRIMARY must stay read_only until 2+ ONLINE")
+
+		cnt, err := warm.backend.OnlineMGRMembers(survivor)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, cnt)
+		t.Logf("timing: sole-survivor bootstrap %s (primary=%s read_only=%v)", time.Since(start), survivor.Name, ro)
+	})
+
+	if phase1OK {
+		t.Run("RejoinThenWritable", func(t *testing.T) {
+			start := time.Now()
+
+			for _, n := range down {
+				ports := []int{n.Port}
+				if n.GRPort > 0 {
+					ports = append(ports, n.GRPort)
+				}
+				if err := harness.FreePorts(ports); err != nil {
+					t.Fatalf("rejoin: free ports for %s: %v", n.Name, err)
+				}
+				t.Logf("rejoin: start mysqld %s port %d", n.Name, n.Port)
+				assert.NoError(t, warm.backend.StartNode(context.Background(), n))
+				readyCtx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+				assert.NoError(t, warm.backend.Ready(readyCtx, n))
+				cancel()
+			}
+
+			rejoinCtx, rejoinCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer rejoinCancel()
+			t.Log("rejoin: wait 2+ MGR ONLINE (Phase 2 may open writes)")
+			if err := warm.backend.WaitMGROnlineMembers(rejoinCtx, survivor, 2); err != nil {
+				cnt, _ := warm.backend.OnlineMGRMembers(survivor)
+				for _, na := range warm.neoNodes {
+					t.Logf("neoha log %s:\n%s", na.Name, na.TailNeoHALog(8000))
+				}
+				assert.Failf(t, "MGR rejoin", "online=%d: %v", cnt, err)
+				return
+			}
+			assert.NoError(t, warm.backend.WaitMySQLWritable(rejoinCtx, survivor))
+
+			ro, err := warm.backend.MySQLReadOnly(survivor)
+			assert.NoError(t, err)
+			assert.False(t, ro)
+			t.Logf("timing: rejoin then writable %s (primary=%s)", time.Since(start), survivor.Name)
+		})
+	}
+}
+
+func stopMajorityLossMysqld(t *testing.T, warm warmNeoHACluster, down []*harness.Node) {
+	t.Helper()
 	stopCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	for _, n := range down {
 		t.Logf("failover: stop mysqld %s port %d", n.Name, n.Port)
-		assert.NoError(t, backend.StopNode(stopCtx, n))
+		assert.NoError(t, warm.backend.StopNode(stopCtx, n))
 	}
-
+	freeCtx, freeCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer freeCancel()
+	for _, n := range down {
+		assert.NoError(t, harness.WaitPortFree(freeCtx, "127.0.0.1", n.Port))
+	}
 	t.Log("failover: wait MGR quorum lost on sole survivor")
-	assert.NoError(t, backend.WaitMGROnlineMembersBelow(ctx, survivor, 2))
+	survivor := warm.cluster.Nodes[2]
+	assert.NoError(t, warm.backend.WaitMGROnlineMembersBelow(warm.ctx, survivor, 2))
+}
 
-	survivorEP := harness.EndpointsForClusterNodes(neoNodes, cluster, []*harness.Node{survivor})
+func waitSurvivorRaftLeader(t *testing.T, warm warmNeoHACluster, survivor *harness.Node) {
+	t.Helper()
+	survivorEP := harness.EndpointsForClusterNodes(warm.neoNodes, warm.cluster, []*harness.Node{survivor})
 	assert.Len(t, survivorEP, 1)
 
-	leaderCtx, leaderCancel := context.WithTimeout(context.Background(), 90*time.Second)
-	defer leaderCancel()
-	t.Log("failover: wait NeoHA Raft LEADER on survivor (GTID max + MGR bootstrap)")
-	leaderEP, err := harness.WaitRaftLeader(leaderCtx, survivorEP)
-	assert.NoError(t, err)
-	assert.Equal(t, neoNodes[2].Endpoint, leaderEP)
+	stepDownCtx, stepDownCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer stepDownCancel()
+	t.Log("failover: wait old Raft LEADER (n1/n2 NeoHA) to step down")
+	for _, ep := range []string{warm.neoNodes[0].Endpoint, warm.neoNodes[1].Endpoint} {
+		assert.NoError(t, harness.WaitRaftNotState(stepDownCtx, ep, "LEADER"))
+		assert.NoError(t, harness.WaitRaftState(stepDownCtx, ep, "FOLLOWER"))
+	}
 
-	_, err = backend.WaitMGRPrimaryOnAny(ctx, []*harness.Node{survivor})
+	leaderCtx, leaderCancel := context.WithTimeout(context.Background(), 8*time.Minute)
+	defer leaderCancel()
+	t.Log("failover: wait NeoHA Raft LEADER on survivor (GTID max + MGR force bootstrap)")
+	leaderEP, err := harness.WaitRaftLeader(leaderCtx, warm.endpoints)
 	assert.NoError(t, err)
-	assert.Equal(t, "PRIMARY", mustRole(t, backend, survivor))
-	t.Logf("neoha bootstrap: raft leader=%s mgr primary=%s", leaderEP, survivor.Name)
+	assert.Equal(t, warm.neoNodes[2].Endpoint, leaderEP)
+
+	t.Log("failover: wait survivor mysqld ready (NeoHA may restart it during bootstrap)")
+	assert.NoError(t, warm.backend.Ready(leaderCtx, survivor))
 }
 
 func mustRole(t *testing.T, backend *harness.MySQL80, node *harness.Node) string {

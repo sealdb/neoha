@@ -72,6 +72,12 @@ func ParseConfig(data []byte, format common.FileType) (*Config, error) {
 	if err != nil {
 		return nil, errors.Wrapf(err, "parse config as %s", format)
 	}
+	if err = conf.Normalize(); err != nil {
+		return nil, err
+	}
+	if err = conf.Validate(); err != nil {
+		return nil, err
+	}
 	return conf, nil
 }
 
