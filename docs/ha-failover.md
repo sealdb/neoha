@@ -199,7 +199,7 @@ sequenceDiagram
 ## 6. MGR — 多数派丢失（2 节点 mysqld 故障，1 幸存者）
 
 **场景：** 3 节点中 **仅 1 个 mysqld 存活**，MGR **无法维持 quorum**（仅 1 个 ONLINE）。  
-**设计目标（v0.5）：**
+**设计目标（v0.1.4）：**
 
 1. **Phase 1：** GTID 最大的幸存者成为 Raft LEADER，**force_members** 单节点 bootstrap → **PRIMARY + read_only**（允许 1 ONLINE）。
 2. **Phase 2：** 故障节点 **mysqld 重新加入** 且 MGR **≥2 ONLINE** 后，才 **开放写**（`SetReadWrite`）。

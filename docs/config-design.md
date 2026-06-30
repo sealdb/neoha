@@ -111,7 +111,7 @@ coordination:
 ### Validation rules
 
 - Exactly one `provider` must be set and recognised.
-- Subtree for **non-selected** providers: optional; if present → log warning in v0.2, error in v1.0.
+- Subtree for **non-selected** providers: optional; if present → log warning in v0.1.1, error in v1.0.
 - `provider=raft` requires `endpoint`, `coordination.raft.meta-datadir`, heartbeat/election timers.
 - `provider=etcd` requires non-empty `hosts` or `host`; must **not** require raft peers file for membership (members come from DCS).
 
@@ -182,7 +182,7 @@ database:
 | `max-open-conns` / `max-idle-conns` | Admin pool |
 | `backup` | Xtrabackup/SSH settings (may move to `manager` — TBD) |
 
-#### Mode-specific blocks (target v0.3)
+#### Mode-specific blocks (target v0.1.2)
 
 ```yaml
 database:
@@ -330,7 +330,7 @@ Validation examples:
 | `database.type=mysql`, `replication-mode=mgr`, missing MGR plugin assumptions | warn/fail at SetupBootstrap |
 | `tags.nofailover=true` + manual `trytoleader` | CLI error |
 | `provider=etcd`, empty hosts | fail fast at start |
-| `database.type=postgresql`, `provider=raft` | allowed (v0.4+) |
+| `database.type=postgresql`, `provider=raft` | allowed (v0.1.3+) |
 
 ---
 

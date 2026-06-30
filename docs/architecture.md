@@ -60,15 +60,19 @@ Design references:
 
 **Dependency rule:** upper layers depend on **interfaces** below; L2 must not import `mysql` or `postgresql` packages.
 
-### 3.1 Current code map (v0.1)
+### 3.1 Current code map (as of v0.1.4)
 
-| Layer | Target package | Today |
-|-------|----------------|-------|
-| L1 | `cmd/neoha`, `internal/server`, `api/v1`, `internal/neohactl` | Implemented (MySQL path) |
-| L2 | `internal/coordination/*`, `internal/coordination/wire` | `internal/election` + `raft` (+ `etcd` stub) |
-| L3 | `internal/ha` or reconcile inside `raft` | **Mostly inside `raft` state machines** (MySQL-coupled) |
-| L4 | `internal/database` + drivers | `database.go` leaks `GetMysql()`; PG stub |
-| L5 | `internal/manager` | `mysqld`, backup; no postmaster |
+> **Versioning:** `v0.1.1`–`v0.1.4` are incremental dev milestones on `dev`; **Git tag `v0.2.0`** is the release after PR merge (bundles v0.1.1–v0.1.4). See [§15](#15-implementation-roadmap).
+
+| Layer | Target package | Today (2026-06) |
+|-------|----------------|-----------------|
+| L1 | `cmd/neoha`, `internal/server`, `api/v1`, `internal/neohactl` | ✅ MySQL + PG agent path; REST partial |
+| L2 | `internal/coordination/*`, `internal/coordination/wire` | ✅ Raft via `raftadapter`; **etcd MVP** in `coordination/etcd/`; legacy `internal/election/raft` still hosts consensus SM |
+| L3 | `internal/ha` | ✅ `Reconciler` + `delegate_db_apply` + `primary_hooks`; Raft still contains MySQL-coupled handlers when delegate off |
+| L4 | `internal/database` + drivers | ✅ `driver` interface; MySQL + **PostgreSQL** drivers; legacy `GetMysql()` still used in some raft paths |
+| L5 | `internal/manager` | ✅ `mysqld`, backup; **no postmaster** yet |
+
+Granular v0.1.1–v0.1.4 delivery log: [§15.2](#152-delivered-items-v011v014). Ongoing work: [TODO.md](./TODO.md).
 
 ---
 
@@ -364,8 +368,8 @@ Same driver; Coordinator implementation changes:
 | **Split brain** | Quorum + epoch | Lease TTL + fencing **TBD** |
 | **Ops familiarity** | Xenon users | Patroni/K8s users |
 | **Multi-AZ** | Need odd quorum across sites | DCS ops model |
-| **MySQL v0.1** | ✅ | stub |
-| **PG target** | v0.4 | v0.5+ |
+| **MySQL** | ✅ semi-sync / MGR + Raft | etcd MVP (PG IT); Consul/K8s **TBD** |
+| **PostgreSQL** | ✅ Driver + Raft IT | ✅ etcd DCS MVP + IT |
 
 **NeoHA “more powerful” angle:** same reconcile code, **swap provider per environment** without swapping DB engine or product.
 
@@ -472,17 +476,85 @@ Optional **database process** control (not the HA agent itself):
 
 ## 15. Implementation roadmap
 
-Phases align with [TODO.md](./TODO.md); architecture milestones:
+Phases align with [TODO.md](./TODO.md) (open items only).
 
-| Phase | Deliverable |
-|-------|-------------|
-| **v0.1** ✅ | MySQL semi-sync/MGR + embedded Raft; CI; IT harness |
-| **v0.2** | `driver.go` + mysql/pg drivers; `coordination` + `ha/reconcile` scaffold; config `coordination.*` + `Validate()` |
-| **v0.3** | Extract L3 reconcile from raft; mysql implements `Driver`; raft uses evaluator/applier only |
-| **v0.4** | PG `Driver` + PG evaluator; 3-node PG + raft IT |
-| **v0.5** | `coordination.Coordinator` interface; etcd provider MVP |
-| **v0.6** | REST cluster API; dynamic config in DCS |
-| **v1.0** | Production readiness criteria **TBD** (docs, auth, matrix green, schema stable) |
+### Versioning convention
+
+| Label | Meaning |
+|-------|---------|
+| **v0.1.0** | Tagged baseline (MySQL HA + Raft); on `main` / historical tag |
+| **v0.1.1 – v0.1.4** | Incremental **dev milestones** on `dev` (one row per architecture deliverable in §15.2) |
+| **v0.2.0** | **Release tag** after PR merge — packages all delivered v0.1.1–v0.1.4 work; not tagged until merge |
+| **v0.3.0+** | Next roadmap phases (formerly sketched as “v0.6”) |
+
+**Delivered** dev milestones (ship in **v0.2.0** release):
+
+| Phase | Status | Deliverable |
+|-------|--------|-------------|
+| **v0.1.0** | ✅ tagged | MySQL semi-sync/MGR + embedded Raft; CI; IT harness |
+| **v0.1.1** | ✅ | `driver.go` + mysql/pg driver stubs; `coordination` + `ha/reconcile` scaffold; config `coordination.*` + `Validate()` |
+| **v0.1.2** | ✅ | Reconciler apply + `delegate_db_apply`; mysql `Driver`; raft DB ops via dbDriver; MGR two-phase promote path |
+| **v0.1.3** | ✅ | PG `Driver` (bootstrap/promote/demote); `primary_hooks`; PG + Raft IT |
+| **v0.1.4** | ✅ | etcd Coordinator MVP; PG ApplyReplica / pg_rewind / lag; MGR majority-loss; IT warm fixtures; HA docs |
+| **v0.2.0** | ⏳ merge → tag | GitHub **Release** bundling v0.1.1–v0.1.4 (this PR) |
+| **v0.3.0** | — | REST cluster API; dynamic config in DCS |
+| **v1.0.0** | — | Production readiness criteria **TBD** (docs, auth, matrix green, schema stable) |
+
+### 15.2 Delivered items (v0.1.1–v0.1.4)
+
+Archive of the former [TODO.md](./TODO.md) scaffold checklist — **one row per PR-sized deliverable**, with code locations. All rows below are included in the planned **v0.2.0** release.
+
+#### L2 — Coordination
+
+| Ver | Item | Location |
+|-----|------|----------|
+| v0.1.1 | `coordination.Coordinator` interface | `internal/coordination/coordinator.go` |
+| v0.1.1 | Raft adapter | `internal/coordination/raftadapter/` |
+| v0.1.1 | Provider factory / wire | `internal/coordination/wire/factory.go` |
+| v0.1.1 | `coordination.*` config + `Validate()` (accepts legacy `election.*`) | `internal/config/config_validate.go` |
+| v0.1.4 | etcd DCS + election lifecycle | `internal/coordination/etcd/`, `internal/election/` |
+| v0.1.4 | PG + etcd example config | `configs/examples/postgresql/etcd-node1.yaml` |
+
+#### L3 — HA Reconcile
+
+| Ver | Item | Location |
+|-----|------|----------|
+| v0.1.1 | `ha.Reconciler` skeleton | `internal/ha/reconcile.go` |
+| v0.1.2 | Reconciler apply (demote safety net; promote gated) | `internal/ha/reconcile.go` |
+| v0.1.2 | Server reconcile loop | `internal/server/server.go` |
+| v0.1.2 | `ha.delegate_db_apply` — MGR two-phase promote delegated to Driver | `internal/database/mysql/driver.go`, `internal/ha/reconcile.go`, `internal/election/raft/leader.go` |
+| v0.1.2 | `ApplyReplica` + integration delegate path | `internal/ha/reconcile.go`, `test/integration/harness/` |
+| v0.1.2 | Raft: remove remaining direct MySQL promote when delegate on | `internal/election/raft/leader.go`, `follower.go` |
+| v0.1.3 | `ha.primary_hooks` (VIP etc.) | `internal/ha/primary_hook.go` |
+| v0.1.4 | MGR majority-loss: sole survivor force-bootstrap + read-only PRIMARY | `internal/election/raft/candidate.go`, `internal/database/mysql/mysqlbase.go`, `internal/ha/reconcile.go` |
+| v0.1.4 | MGR rejoin → writable when quorum ≥ 2 (`mgrQuorum=2`) | `internal/ha/reconcile.go`, `internal/database/mysql/driver.go` |
+
+#### L4 — Database Driver
+
+| Ver | Item | Location |
+|-----|------|----------|
+| v0.1.1 | `database/driver` interface | `internal/database/driver/driver.go` |
+| v0.1.1–v0.1.2 | MySQL `Driver` implementation | `internal/database/mysql/driver.go` |
+| v0.1.2 | Raft calls dbDriver: Promotable / Demote / ChangeToMaster | `internal/election/raft/dbops.go` |
+| v0.1.4 | PG bootstrap / promote / demote / status | `internal/database/postgresql/driver.go` |
+| v0.1.4 | PG `ApplyReplica` (primary_conninfo + slot) | `internal/database/postgresql/replica.go` |
+| v0.1.4 | PG `pg_rewind` automation | `internal/database/postgresql/rewind.go` |
+| v0.1.4 | PG `ReplicationLagBytes` / Promotable lag check | `internal/database/postgresql/lag.go` |
+
+#### Config, tests, documentation
+
+| Ver | Item | Location |
+|-----|------|----------|
+| v0.1.1+ | Example YAML with inline comments | `configs/examples/*.yaml`, `configs/README.md` |
+| v0.1.4 | IT: warm fixture, parallel `StartAll`, 150 ms poll, segment timing | `test/integration/harness/backend.go`, `*_warm_test.go` |
+| v0.1.4 | PG IT: ApplyReplica, pg_rewind, etcd failover | `test/integration/harness/postgresql.go`, `pg_*_test.go` |
+| v0.1.4 | MGR IT: delegate path, majority-loss, dedicated ports | `test/integration/mgr_neoha_test.go` |
+| v0.1.4 | Semi-sync IT: failover fix + Xenon-style 2s×5 heartbeat | `test/integration/semisync_neoha_test.go`, `harness/neoha.go` |
+| v0.1.4 | MySQL HA failover guide | [ha-failover.md](./ha-failover.md) |
+| v0.1.4 | Architecture + config design | this doc, [config-design.md](./config-design.md) |
+| v0.1.4 | Deployment guide | [deployment.md](./deployment.md) |
+
+**Not yet done (see TODO P0 / backlog):** Raft package internal refactor (§15.1), Consul/K8s providers, REST **v0.3.0**, postmaster (L5), full removal of `GetMysql()` from raft.
 
 ### 15.1 Refactor guardrails (from prior discussion)
 
@@ -539,3 +611,4 @@ Phases align with [TODO.md](./TODO.md); architecture milestones:
 | Date | Change |
 |------|--------|
 | 2026-06-28 | Initial architecture doc (full-vision baseline) |
+| 2026-06-29 | §3.1 / §8 / §15 updated; §15.2 delivery log; versioning v0.1.1–v0.1.4 → release **v0.2.0** |

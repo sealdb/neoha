@@ -22,6 +22,7 @@ Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
 | Architecture (L1–L5, Coordinator / Driver / Reconciler)                                     | [docs/architecture.md](docs/architecture.md)             |
 | **MySQL HA failover** (3-node semi-sync & MGR: minority / majority loss, sequence diagrams) | [docs/ha-failover.md](docs/ha-failover.md)               |
 | Config schema & validation                                                                  | [docs/config-design.md](docs/config-design.md)           |
+| **Deployment** (build, 3-node wiring, neohactl, checklists)                                 | [docs/deployment.md](docs/deployment.md)                 |
 | Roadmap & IT notes                                                                          | [docs/TODO.md](docs/TODO.md)                             |
 | Integration test harness                                                                    | [test/integration/README.md](test/integration/README.md) |
 
