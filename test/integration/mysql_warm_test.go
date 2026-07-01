@@ -31,6 +31,19 @@ import (
 	"github.com/sealdb/neoha/test/integration/harness"
 )
 
+func cleanupWarmCluster(t *testing.T, cluster *harness.Cluster) {
+	t.Helper()
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer stopCancel()
+	keep := harness.KeepWorkDir()
+	if err := cluster.StopAndMaybeTeardown(stopCtx, keep); err != nil {
+		t.Logf("warm: cluster cleanup: %v", err)
+	}
+	if keep {
+		t.Logf("warm: kept workdir %s (NEOHA_IT_TEARDOWN=1 to remove)", cluster.WorkDir)
+	}
+}
+
 const (
 	warmMGRClusterName      = "neoha-mgr-warm"
 	warmMGRMajorClusterName = "neoha-mgr-major-warm"
@@ -88,9 +101,7 @@ func newWarmMySQLCluster(t *testing.T, name string, mysqlPorts []int, grPorts []
 
 	t.Cleanup(func() {
 		cancel()
-		stopCtx, stopCancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer stopCancel()
-		_ = cluster.Teardown(stopCtx)
+		cleanupWarmCluster(t, cluster)
 	})
 
 	start = time.Now()

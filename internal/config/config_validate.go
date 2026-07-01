@@ -91,6 +91,7 @@ func (c *Config) Validate() error {
 		if coord.Etcd == nil || (coord.Etcd.Host == "" && len(coord.Etcd.Hosts) == 0) {
 			return errors.New("coordination.etcd host or hosts is required when provider is etcd")
 		}
+		inheritEtcdDCSFromBootstrap(c, coord.Etcd)
 	case "consul", "kubernetes", "zookeeper":
 		return errors.Errorf("coordination provider %q is not implemented yet", provider)
 	default:
@@ -111,23 +112,55 @@ func (c *Config) Validate() error {
 		if c.Database.Postgresql == nil {
 			return errors.New("database.postgresql section is required when database.type is postgresql")
 		}
-		if c.Database.Postgresql.MaximumLagOnFailover == 0 &&
-			c.Bootstrap != nil && c.Bootstrap.BootstrapPostgresql != nil &&
-			c.Bootstrap.BootstrapPostgresql.DcsConf != nil {
-			c.Database.Postgresql.MaximumLagOnFailover = int64(c.Bootstrap.BootstrapPostgresql.DcsConf.MaximumLagOnFailover)
-		}
-		if !c.Database.Postgresql.UseSlots &&
-			c.Bootstrap != nil && c.Bootstrap.BootstrapPostgresql != nil &&
-			c.Bootstrap.BootstrapPostgresql.DcsConf != nil {
-			c.Database.Postgresql.UseSlots = c.Bootstrap.BootstrapPostgresql.DcsConf.UseSlots
-		}
-		if !c.Database.Postgresql.UsePGRewind &&
-			c.Bootstrap != nil && c.Bootstrap.BootstrapPostgresql != nil &&
-			c.Bootstrap.BootstrapPostgresql.DcsConf != nil {
-			c.Database.Postgresql.UsePGRewind = c.Bootstrap.BootstrapPostgresql.DcsConf.UsePGRewind
-		}
+		inheritPostgreSQLFailoverFromBootstrap(c)
 	default:
 		return errors.Errorf("unsupported database.type %q", dbType)
 	}
 	return nil
+}
+
+func bootstrapDCS(c *Config) *DcsConfig {
+	if c == nil || c.Bootstrap == nil || c.Bootstrap.BootstrapPostgresql == nil {
+		return nil
+	}
+	return c.Bootstrap.BootstrapPostgresql.DcsConf
+}
+
+func inheritEtcdDCSFromBootstrap(c *Config, etcd *EtcdConfig) {
+	if etcd == nil {
+		return
+	}
+	dcs := bootstrapDCS(c)
+	if dcs == nil {
+		return
+	}
+	if etcd.TTL <= 0 && dcs.TTL > 0 {
+		etcd.TTL = dcs.TTL
+	}
+	if etcd.LoopWait <= 0 && dcs.LoopWait > 0 {
+		etcd.LoopWait = dcs.LoopWait
+	}
+	if etcd.RetryTimeout <= 0 && dcs.RetryTimeout > 0 {
+		etcd.RetryTimeout = dcs.RetryTimeout
+	}
+}
+
+func inheritPostgreSQLFailoverFromBootstrap(c *Config) {
+	pg := c.Database.Postgresql
+	dcs := bootstrapDCS(c)
+	if pg == nil || dcs == nil {
+		return
+	}
+	if pg.MaximumLagOnFailover == 0 && dcs.MaximumLagOnFailover > 0 {
+		pg.MaximumLagOnFailover = int64(dcs.MaximumLagOnFailover)
+	}
+	if !pg.UseSlots && dcs.UseSlots {
+		pg.UseSlots = dcs.UseSlots
+	}
+	if !pg.UsePGRewind && dcs.UsePGRewind {
+		pg.UsePGRewind = dcs.UsePGRewind
+	}
+	if !pg.SynchronousMode && dcs.SynchronousMode {
+		pg.SynchronousMode = dcs.SynchronousMode
+	}
 }

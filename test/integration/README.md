@@ -73,13 +73,38 @@ make test-integration 'TestNeoHAMGRFailoverMajorityLoss/RejoinThenWritable'
 
 `make test-integration` pre-builds `bin/neoha-it.test`, then runs all tests with a **15-minute** global timeout (`-test.timeout=15m`). It passes through `NEOHA_IT_MYSQL_BASE` and `NEOHA_IT_XTRABACKUP_BINDIR` when set; otherwise it uses the defaults shown in the Makefile.
 
-Pre-build `neoha` / `neohactl` to avoid implicit compile during IT:
+Pre-build `neoha` / `neohactl` to avoid implicit compile during IT (also done automatically by `make test-integration`):
 
 ```bash
-go build -o bin/neoha ./cmd/neoha
-go build -o bin/neohactl ./cmd/neohactl
-export NEOHA_IT_BIN=$PWD/bin/neoha NEOHA_IT_CTL_BIN=$PWD/bin/neohactl
+make build
+# or rely on defaults: ./bin/neoha and ./bin/neohactl when present
 make test-integration
+```
+
+`make test-integration` sets `NEOHA_IT_BIN` / `NEOHA_IT_CTL_BIN` to `$(pwd)/bin/neoha` and `bin/neohactl` when unset. The harness also picks up `./bin/*` from the repo root when env vars are empty.
+
+### One-time datadir prep (warm clusters)
+
+Cold MySQL datadir init is the slowest part of the first IT run (~20–30s per node). Initialize once and reuse across runs:
+
+```bash
+make test-integration-prep
+make test-integration
+```
+
+This creates datadirs under `$NEOHA_IT_WORKDIR` for:
+
+| Cluster name | MySQL ports | Mode |
+|--------------|-------------|------|
+| `neoha-mgr-warm` | 13306–13308 | MGR |
+| `neoha-semisync-warm` | 13316–13318 | semi-sync |
+
+By default, warm tests **stop mysqld but keep workdirs** so the next run skips init. To remove artifacts after a run:
+
+```bash
+NEOHA_IT_TEARDOWN=1 make test-integration
+# or
+rm -rf "${NEOHA_IT_WORKDIR:-/tmp/neoha-it}/neoha-mgr-warm"
 ```
 
 ### Environment variables
@@ -90,7 +115,9 @@ make test-integration
 | `NEOHA_IT_XTRABACKUP_BINDIR` | Directory with `xtrabackup` and `xbstream` |
 | `NEOHA_IT_CONFIG` | Override IT config file path |
 | `NEOHA_IT_WORKDIR` | Artifact directory (default `$TMPDIR/neoha-it`) |
-| `NEOHA_IT_BIN` / `NEOHA_IT_CTL_BIN` | Pre-built `neoha` / `neohactl` (else built under `workdir/bin`) |
+| `NEOHA_IT_BIN` / `NEOHA_IT_CTL_BIN` | Pre-built `neoha` / `neohactl` (default: `./bin/neoha`, `./bin/neohactl` from `make build`) |
+| `NEOHA_IT_KEEP_WORKDIR` | `1` (default): stop processes but retain datadirs; `0` removes workdir after warm tests |
+| `NEOHA_IT_TEARDOWN` | `1`: always remove cluster workdir after warm tests (overrides keep) |
 | `NEOHA_IT_SSH_PORT` | SSH port when not using `it.local.yaml` |
 
 Example:
@@ -188,9 +215,29 @@ IT `my.cnf` puts `socket` and `pid-file` inside `datadir` so `rebuildme`’s dat
 To force a clean slate:
 
 ```bash
+NEOHA_IT_TEARDOWN=1 make test-integration
+# or manually:
 rm -rf "${NEOHA_IT_WORKDIR:-/tmp/neoha-it}"
 pkill -f 'defaults-file=/tmp/neoha-it' || true
 ```
+
+## Failover segment baseline
+
+Warm suite logs distinguish **end-to-end test time** from the **failover segment** (fault injection → new primary ready):
+
+| Log prefix | Meaning | Typical range (warm, WSL) |
+|------------|---------|---------------------------|
+| `timing: init datadirs` | mysqld datadir + my.cnf (skipped when reused) | 0s (reuse) or ~30–90s (cold) |
+| `timing: mysqld ready` | 3× mysqld up | ~5–15s |
+| `timing: neoha ready` | NeoHA agents + CLI wire | ~10–30s |
+| `timing: MGR 3 online` / `timing: semi-sync formation` | Cluster healthy before fault | ~15–60s |
+| `timing: failover segment` | **Stop old primary → new primary + replication** | semi-sync ~10–50s; MGR ~30–78s |
+| `timing: sole-survivor bootstrap` | MGR majority-loss phase 1 | ~17–50s |
+| `timing: rejoin then writable` | MGR majority-loss phase 2 | ~5–30s |
+
+Semi-sync target after warm formation: **~10–15s** failover segment (2s heartbeat × 5 admit-defeat). MGR IT uses faster Raft timers (`500/1500` ms) but MGR plugin re-election dominates latency.
+
+See also [docs/TODO.md](../docs/TODO.md) for full-suite timing (~6–8 min with warm datadirs + pre-built bins).
 
 ## Scenarios
 

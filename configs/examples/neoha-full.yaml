@@ -1,5 +1,5 @@
-# NeoHA 全量配置参考（MySQL semi-sync 示例值）
-# 复制后请按环境修改路径、地址与凭据。字段说明见 docs/config-design.md
+# NeoHA 全量配置参考 — 所有支持字段的默认值写法
+# 复制后请按环境修改 scope/name/endpoint、路径与凭据。字段说明见 docs/config-design.md
 
 # 逻辑集群名，同 scope 下所有 NeoHA 成员必须一致（类似 Patroni scope）
 scope: neoha
@@ -8,7 +8,7 @@ namespace: /service/
 # 本节点在集群内的唯一成员名
 name: db1
 
-# NeoHA P2P RPC 监听地址 host:port；Raft 成员标识，必填
+# NeoHA P2P RPC 监听地址 host:port；Raft 成员标识，provider=raft 时必填
 endpoint: 127.0.0.1:8080
 # HTTP REST / 指标监听地址（可选）；空则不开 REST
 peer-address: :6060
@@ -38,7 +38,7 @@ ctl:
 
 # 【legacy】协调后端配置；新配置请用 coordination（二者会自动互相同步）
 election:
-    # 协调算法：raft | etcd（etcd 尚未实现）
+    # 协调算法：raft | etcd
     algorithm: raft
     raft:
         # Raft 元数据目录（peers.json、view/epoch 等）
@@ -70,6 +70,12 @@ election:
         hosts: []
         # 是否通过 proxy 发现 etcd
         use_proxies: false
+        # DCS leader lease TTL，单位秒（Patroni 风格）
+        ttl: 30
+        # DCS reconcile 循环间隔，单位秒
+        loop_wait: 10
+        # DCS 操作重试窗口，单位秒
+        retry_timeout: 10
 
 # 【推荐】L2 协调层配置；provider 与 election.algorithm 等价
 coordination:
@@ -90,12 +96,15 @@ coordination:
         host: ""
         hosts: []
         use_proxies: false
+        ttl: 30
+        loop_wait: 10
+        retry_timeout: 10
 
 # 仅首次初始化集群时读取；日常 failover 不再使用
 bootstrap:
     postgresql:
         dcs:
-            # Patroni 风格 PG DCS TTL（秒）；PG 路径 TBD
+            # 【legacy】Patroni 风格 PG DCS 参数；运行时 failover 策略请优先用 database.postgresql.*
             ttl: 30
             loop_wait: 10
             retry_timeout: 10
@@ -123,7 +132,7 @@ database:
     # 数据库引擎：mysql | postgresql
     type: mysql
     postgresql:
-        # PG 版本 handler：postgresql14 等（PG Driver 尚未完整实现）
+        # PG 版本 handler：postgresql14 | postgresql15 | postgresql16 等
         version: postgresql14
         listen: 127.0.0.1:5432
         connect_address: 127.0.0.1:5432
@@ -143,8 +152,20 @@ database:
                 password: ""
         krbsrvname: postgres
         parameters: {}
-        # 升主前执行的自定义脚本/SQL（PG TBD）
+        # 升主前执行的自定义脚本/SQL
         pre_promote: ""
+        # 是否管理物理复制 slot（recovery primary_slot_name）
+        use_slots: false
+        # 本节点在 primary 上的 slot 名；空则按 name 推导
+        primary_slot_name: ""
+        # 允许升主的最大复制 lag（字节）；0 表示不限制
+        maximum_lag_on_failover: 0
+        # 重新加入集群时是否尝试 pg_rewind
+        use_pg_rewind: false
+        # 是否要求同步副本才提交（语义 TBD）
+        synchronous_mode: false
+        # 无同步副本时是否仍强制 synchronous_mode（TBD）
+        synchronous_mode_strict: false
     mysql:
         # MySQL 管理员账号（NeoHA 连接实例用）
         admin: root
@@ -218,9 +239,9 @@ tags:
     # PG 非同步副本；MySQL semi-sync 行为 TBD
     nosync: false
 
-# L3 HA  reconcile 循环（Patroni run_cycle 等价）
+# L3 HA reconcile 循环（Patroni run_cycle 等价）
 ha:
-    # reconcile  tick 间隔（秒）；0 表示使用内置默认 3s
+    # reconcile tick 间隔（秒）；0 表示使用内置默认 3s
     reconcile_interval: 3
     # 为 true 时 DB 升/降主由 Reconciler+Driver 负责，Raft 不再直接改 MySQL 角色
     delegate_db_apply: false

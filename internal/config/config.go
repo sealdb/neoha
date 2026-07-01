@@ -54,6 +54,7 @@ type RestAPIConfig struct {
 
 func DefaultRestAPIConfig() *RestAPIConfig {
 	return &RestAPIConfig{
+		EnableAPIs:     false,
 		Listen:         "127.0.0.1:8008",
 		ConnectAddress: "127.0.0.1:8008",
 		Certfile:       "",
@@ -82,6 +83,10 @@ type EtcdConfig struct {
 	UseProxies bool     `yaml:"use_proxies" json:"use_proxies"`
 	// TTL is the DCS leader lease TTL in seconds (Patroni-style).
 	TTL int `yaml:"ttl" json:"ttl"`
+	// LoopWait is the DCS reconcile loop interval in seconds (Patroni-style).
+	LoopWait int `yaml:"loop_wait" json:"loop_wait"`
+	// RetryTimeout is the DCS operation retry window in seconds (Patroni-style).
+	RetryTimeout int `yaml:"retry_timeout" json:"retry_timeout"`
 	/*
 	 * Provide host to do the initial discovery of the cluster topology:
 	 * host: 127.0.0.1:2379
@@ -100,9 +105,12 @@ type EtcdConfig struct {
 
 func DefaultEtcdConfig() *EtcdConfig {
 	return &EtcdConfig{
-		Host:  "",
-		Hosts: []string{},
-		TTL:   30,
+		Host:         "",
+		Hosts:        []string{},
+		UseProxies:   false,
+		TTL:          30,
+		LoopWait:     10,
+		RetryTimeout: 10,
 	}
 }
 
@@ -276,6 +284,7 @@ func DefaultDcsConfig() *DcsConfig {
 		RetryTimeout:         10,
 		MaximumLagOnFailover: 1048576,
 		MasterStartTimeout:   300,
+		SynchronousMode:      false,
 		StandbyCluster:       DefaultStandbyClusterConfig(),
 		UsePGRewind:          true,
 		UseSlots:             true,
@@ -297,9 +306,9 @@ func DefaultInitDBConfig() *InitDBConfig {
 }
 
 type BootstrapPostgresqlUsersConfig struct {
-	Username string
-	Password string
-	Options  []string
+	Username string   `yaml:"username" json:"username"`
+	Password string   `yaml:"password" json:"password"`
+	Options  []string `yaml:"options" json:"options"`
 }
 
 type BootstrapPostgresqlConfig struct {
@@ -400,21 +409,31 @@ type PostgresqlConfig struct {
 	MaximumLagOnFailover int64 `yaml:"maximum_lag_on_failover" json:"maximum_lag_on_failover"`
 	// UsePGRewind runs pg_rewind when rejoining as replica after timeline fork (requires data_dir + bin_dir).
 	UsePGRewind bool `yaml:"use_pg_rewind" json:"use_pg_rewind"`
+	// SynchronousMode requires a synchronous replica before commits (exact semantics TBD).
+	SynchronousMode bool `yaml:"synchronous_mode" json:"synchronous_mode"`
+	// SynchronousModeStrict enforces synchronous_mode even when no sync replica is available (TBD).
+	SynchronousModeStrict bool `yaml:"synchronous_mode_strict" json:"synchronous_mode_strict"`
 }
 
 func DefaultPostgresqlConfig() *PostgresqlConfig {
 	return &PostgresqlConfig{
-		Version:        "postgresql14",
-		Listen:         "127.0.0.1:5432",
-		ConnectAddress: "127.0.0.1:5432",
-		DataDir:        "",
-		BinDir:         "",
-		ConfigDir:      "",
-		PGPass:         "",
-		Auth:           DefaultPGAuthConfig(),
-		Krbsrvname:     "postgres",
-		Parameters:     map[string]string{},
-		PrePromote:     "",
+		Version:               "postgresql14",
+		Listen:                "127.0.0.1:5432",
+		ConnectAddress:        "127.0.0.1:5432",
+		DataDir:               "",
+		BinDir:                "",
+		ConfigDir:             "",
+		PGPass:                "",
+		Auth:                  DefaultPGAuthConfig(),
+		Krbsrvname:            "postgres",
+		Parameters:            map[string]string{},
+		PrePromote:            "",
+		UseSlots:              false,
+		PrimarySlotName:       "",
+		MaximumLagOnFailover:  0,
+		UsePGRewind:           false,
+		SynchronousMode:       false,
+		SynchronousModeStrict: false,
 	}
 }
 

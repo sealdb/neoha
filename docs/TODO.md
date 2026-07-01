@@ -25,7 +25,7 @@
 |------|-----|-------------|------|
 | [x] | `internal/database/mysql` | `TestMysqlRPCStatus` | mock 期望已对齐 |
 | [x] | `internal/neohactl` | `TestCLIRaftCommand_MySQL_MGR` | 已补 MGR mock |
-| [ ] | `internal/election/raft` | MGR flaky | `MockWaitUntil` / handler reset 稳定化 |
+| [ ] | `internal/election/raft` | MGR flaky | `MockWaitUntil` / handler reset 稳定化（当前 `make test` 全绿，持续观察） |
 
 ```bash
 make test
@@ -39,9 +39,9 @@ go test $(go list ./... | grep -v test/integration)
 
 | 状态 | 项 | 说明 |
 |------|-----|------|
-| [ ] | 跨测试复用 datadir | 同端口 + 稳定 cluster 名，或 `make it-prep` 一次初始化 |
-| [ ] | Makefile 默认 `NEOHA_IT_BIN` | 避免 IT 隐式编译 |
-| [ ] | 文档：failover 段 baseline | 区分「端到端用例耗时」vs「warm 后 failover 段」；README 已部分更新 |
+| [x] | 跨测试复用 datadir | 稳定 cluster 名 + 默认保留 workdir；`make test-integration-prep` 预初始化 |
+| [x] | Makefile 默认 `NEOHA_IT_BIN` | `make test-integration` / `make test-integration-prep` 依赖 `make build`，默认 `./bin/neoha` |
+| [x] | 文档：failover 段 baseline | [test/integration/README.md](../test/integration/README.md) § Failover segment baseline |
 
 **实测 baseline（2026-06-29，WSL，datadir 已存在，bin 预编译）**：
 
@@ -234,3 +234,4 @@ make test-integration
 | 2026-06-29 | 重组文档结构：P0 仅未完成项；里程碑按 L2/L3/L4 归档；backlog 去重 |
 | 2026-06-29 | 新增 [deployment.md](./deployment.md) |
 | 2026-06-29 | 版本号对齐：dev 里程碑 v0.1.1–v0.1.4，PR 合并后打 tag **v0.2.0** |
+| 2026-07-01 | 阶段 1：config 对齐 config-design；test-integration-prep + 默认 bin + datadir 复用 |

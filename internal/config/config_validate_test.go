@@ -61,6 +61,23 @@ func TestValidateEtcdRequiresHosts(t *testing.T) {
 	assert.Contains(t, err.Error(), "etcd")
 }
 
+func TestValidateEtcdInheritsBootstrapDCS(t *testing.T) {
+	conf := DefaultConfig()
+	conf.Coordination.Provider = "etcd"
+	conf.Election.Algo = "etcd"
+	conf.Coordination.Etcd.Host = "127.0.0.1:2379"
+	conf.Coordination.Etcd.TTL = 0
+	conf.Coordination.Etcd.LoopWait = 0
+	conf.Coordination.Etcd.RetryTimeout = 0
+	conf.Bootstrap.BootstrapPostgresql.DcsConf.TTL = 45
+	conf.Bootstrap.BootstrapPostgresql.DcsConf.LoopWait = 12
+	conf.Bootstrap.BootstrapPostgresql.DcsConf.RetryTimeout = 8
+	assert.NoError(t, conf.Validate())
+	assert.Equal(t, 45, conf.Coordination.Etcd.TTL)
+	assert.Equal(t, 12, conf.Coordination.Etcd.LoopWait)
+	assert.Equal(t, 8, conf.Coordination.Etcd.RetryTimeout)
+}
+
 func TestValidatePostgreSQLInheritsBootstrapDCS(t *testing.T) {
 	conf := DefaultConfig()
 	conf.Database.Type = "postgresql"

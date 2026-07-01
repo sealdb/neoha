@@ -39,6 +39,8 @@ const (
 	EnvITConfig           = "NEOHA_IT_CONFIG"
 	EnvXtrabackupBinDir   = "NEOHA_IT_XTRABACKUP_BINDIR"
 	EnvSSHPort            = "NEOHA_IT_SSH_PORT"
+	EnvKeepWorkDir        = "NEOHA_IT_KEEP_WORKDIR"
+	EnvTeardownWorkDir    = "NEOHA_IT_TEARDOWN"
 	defaultMySQLBase      = "/home/wslu/work/mysql/mysql80-debug"
 	defaultXtrabackupBase = "/home/wslu/work/mysql/xtrabackup-8.0.35"
 )
@@ -195,14 +197,40 @@ func (s *IntegrationSettings) XtrabackupBinDir() string {
 	return xtrabackupToolDir(dir)
 }
 
+func repoBinIfExists(name string) string {
+	root, err := repoRootFromCWD()
+	if err != nil {
+		return ""
+	}
+	path := filepath.Join(root, "bin", name)
+	if fileExists(path) {
+		return path
+	}
+	return ""
+}
+
 // NeoHABinPath returns a pre-built neoha binary path or empty.
+// Priority: IT config → NEOHA_IT_BIN → ./bin/neoha (when present).
 func (s *IntegrationSettings) NeoHABinPath() string {
-	return firstNonEmpty(s.file.NeoHABin, os.Getenv(EnvNeoHABin))
+	return firstNonEmpty(s.file.NeoHABin, os.Getenv(EnvNeoHABin), repoBinIfExists("neoha"))
 }
 
 // NeoHACtlBinPath returns a pre-built neohactl binary path or empty.
+// Priority: IT config → NEOHA_IT_CTL_BIN → ./bin/neohactl (when present).
 func (s *IntegrationSettings) NeoHACtlBinPath() string {
-	return firstNonEmpty(s.file.NeoHACtlBin, os.Getenv(EnvNeoHACtlBin))
+	return firstNonEmpty(s.file.NeoHACtlBin, os.Getenv(EnvNeoHACtlBin), repoBinIfExists("neohactl"))
+}
+
+// KeepWorkDir reports whether integration tests should retain cluster workdirs
+// after stop (reuse datadirs on the next run). Default true unless NEOHA_IT_TEARDOWN=1.
+func KeepWorkDir() bool {
+	if os.Getenv(EnvTeardownWorkDir) == "1" {
+		return false
+	}
+	if v := os.Getenv(EnvKeepWorkDir); v != "" {
+		return v != "0" && !strings.EqualFold(v, "false")
+	}
+	return true
 }
 
 func (s *IntegrationSettings) sshHost() string {

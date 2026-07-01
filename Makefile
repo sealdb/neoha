@@ -21,7 +21,7 @@ export LDFLAGS :=
 COVERAGE_OUT := coverage.out
 COVERAGE_LOG := coverage.log
 
-.PHONY: build clean install fmt test testbase testconfig testdatabase testmanager testelection testserver testcmd test-integration vet coverage coverage-ci
+.PHONY: build clean install fmt test testbase testconfig testdatabase testmanager testelection testserver testcmd test-integration test-integration-prep vet coverage coverage-ci
 
 # Optional test names after test-integration become dummy goals so make does not error.
 # Example: make test-integration TestNeoHASemiSyncWarmSuite,TestNeoHAMGRWarmSuite
@@ -75,7 +75,7 @@ testconfig:
 	go test -v ./internal/config/...
 testdatabase:
 	go test -v ./internal/database/mysql/...
-	# go test -v ./internal/database/postgresql/...
+	go test -v ./internal/database/postgresql/...
 testmanager:
 	go test -v ./internal/manager/mysqld/...
 	# go test -v ./internal/manager/postmaster/...
@@ -88,7 +88,7 @@ testcmd:
 	go test -v ./internal/neohactl/...
 	go test -v ./api/v1/...
 
-test-integration:
+test-integration: build
 	@echo "--> Integration testing..."
 	@mkdir -p bin
 	@echo "--> Pre-building test binary (avoids silent compile)..."
@@ -104,21 +104,32 @@ test-integration:
 		echo "--> Filter: -test.run $$run"; \
 		args="$$args -test.run $$run"; \
 	fi; \
+	NEOHA_IT_BIN=$${NEOHA_IT_BIN:-$(CURDIR)/bin/neoha} \
+	NEOHA_IT_CTL_BIN=$${NEOHA_IT_CTL_BIN:-$(CURDIR)/bin/neohactl} \
 	NEOHA_IT_MYSQL_BASE=$${NEOHA_IT_MYSQL_BASE:-/home/wslu/work/mysql/mysql80-debug} \
 	NEOHA_IT_XTRABACKUP_BINDIR=$${NEOHA_IT_XTRABACKUP_BINDIR:-/home/wslu/work/mysql/xtrabackup-8.0.35} \
 		bin/neoha-it.test $$args
+
+# One-time MySQL datadir init for warm integration clusters (MGR + semi-sync). Reuses $NEOHA_IT_WORKDIR.
+test-integration-prep: build
+	@echo "--> Preparing warm IT datadirs under $${NEOHA_IT_WORKDIR:-/tmp/neoha-it}..."
+	NEOHA_IT_PREP=1 \
+	NEOHA_IT_BIN=$(CURDIR)/bin/neoha \
+	NEOHA_IT_CTL_BIN=$(CURDIR)/bin/neohactl \
+	NEOHA_IT_MYSQL_BASE=$${NEOHA_IT_MYSQL_BASE:-/home/wslu/work/mysql/mysql80-debug} \
+	go test -tags=integration -count=1 -timeout=30m -run TestITPrepWarmDatadirs ./test/integration
 
 PKGS =	./internal/base/common/... \
 	./internal/base/nlog/... \
 	./internal/base/nrpc/... \
 	./internal/config/... \
 	./internal/database/mysql/... \
+	./internal/database/postgresql/... \
 	./internal/manager/mysqld/... \
 	./internal/election/raft/... \
 	./internal/server/... \
 	./internal/neohactl/... \
 	./api/v1/...
-		#./internal/database/postgresql/... \
 		#./internal/manager/postmaster/... \
 		#./internal/election/etcd/... \
 

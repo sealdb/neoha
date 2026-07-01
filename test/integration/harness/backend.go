@@ -227,6 +227,15 @@ func (c *Cluster) Teardown(ctx context.Context) error {
 	return os.RemoveAll(c.WorkDir)
 }
 
+// StopAndMaybeTeardown stops nodes; removes the workdir only when keepWorkDir is false.
+func (c *Cluster) StopAndMaybeTeardown(ctx context.Context, keepWorkDir bool) error {
+	c.StopAll(ctx)
+	if keepWorkDir {
+		return nil
+	}
+	return os.RemoveAll(c.WorkDir)
+}
+
 // MySQLBaseFromEnv returns the MySQL installation root or empty if unset.
 func MySQLBaseFromEnv() string {
 	return LoadIntegrationSettings().MySQLBase()

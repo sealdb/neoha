@@ -38,7 +38,10 @@
 		"etcd": {
 			"host": "",
 			"hosts": [],
-			"use_proxies": false
+			"use_proxies": false,
+			"ttl": 30,
+			"loop_wait": 10,
+			"retry_timeout": 10
 		}
 	},
 	"coordination": {
@@ -59,7 +62,10 @@
 		"etcd": {
 			"host": "",
 			"hosts": [],
-			"use_proxies": false
+			"use_proxies": false,
+			"ttl": 30,
+			"loop_wait": 10,
+			"retry_timeout": 10
 		}
 	},
 	"bootstrap": {
@@ -119,7 +125,13 @@
 			},
 			"krbsrvname": "postgres",
 			"parameters": {},
-			"pre_promote": ""
+			"pre_promote": "",
+			"use_slots": false,
+			"primary_slot_name": "",
+			"maximum_lag_on_failover": 0,
+			"use_pg_rewind": false,
+			"synchronous_mode": false,
+			"synchronous_mode_strict": false
 		},
 		"mysql": {
 			"admin": "root",
