@@ -1,7 +1,9 @@
 # NeoHA Integration Tests
 
-Integration tests live here and are **not** run by default `make test`.
-They use the Go `integration` build tag.
+Integration tests live here and are **not** run by default `make test` or **GitHub Actions CI**.
+They use the Go `integration` build tag and require a local MySQL 8.0 build (plus optional Xtrabackup / SSH).
+
+**Why not CI?** Installing upstream MySQL/Xtrabackup RPMs and warming datadirs adds many minutes per run; unit tests + coverage in CI are sufficient for merge gates. Run IT locally before releases or after HA-related changes. See [docs/operations.md](../docs/operations.md) for drill procedures aligned with these tests.
 
 ## Design
 

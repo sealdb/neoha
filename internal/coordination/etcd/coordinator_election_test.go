@@ -1,8 +1,6 @@
 /*
  * Copyright 2022-2026 The NeoHA Authors.
  *
- * See the AUTHORS file for a list of contributors.
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -30,19 +28,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func etcdBin() string {
-	if v := os.Getenv("NEOHA_ETCD_BIN"); v != "" {
-		return v
-	}
-	return "/home/wslu/work/github/db/etcd/etcd/bin/etcd"
-}
-
 func startTestEtcd(t *testing.T) (endpoint string, stop func()) {
 	t.Helper()
-	bin := etcdBin()
-	if _, err := os.Stat(bin); err != nil {
-		t.Skipf("etcd binary not found at %s", bin)
-	}
+	bin := requireEtcdServer(t)
 	dir, err := os.MkdirTemp("", "neoha-etcd-*")
 	require.NoError(t, err)
 	endpoint = "127.0.0.1:22379"
@@ -55,22 +43,17 @@ func startTestEtcd(t *testing.T) (endpoint string, stop func()) {
 	)
 	require.NoError(t, cmd.Start())
 	stop = func() {
-		_ = cmd.Process.Signal(os.Interrupt)
-		_, _ = cmd.Process.Wait()
+		if cmd.Process != nil {
+			_ = cmd.Process.Signal(os.Interrupt)
+			_, _ = cmd.Process.Wait()
+		}
 		_ = os.RemoveAll(dir)
 	}
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		c := New(testConfig(endpoint, "n1"))
-		if err := c.Start(context.Background()); err == nil {
-			_ = c.Stop()
-			return endpoint, stop
-		}
-		time.Sleep(200 * time.Millisecond)
+	if err := waitEtcdReady(endpoint, 15*time.Second); err != nil {
+		stop()
+		t.Fatalf("etcd did not become ready: %v", err)
 	}
-	stop()
-	t.Fatal("etcd did not become ready")
-	return "", nil
+	return endpoint, stop
 }
 
 func testConfig(endpoint, name string) *config.Config {

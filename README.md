@@ -25,6 +25,7 @@ Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
 | **MySQL HA failover** (3-node semi-sync & MGR: minority / majority loss, sequence diagrams) | [docs/ha-failover.md](docs/ha-failover.md)               |
 | Config schema & validation                                                                  | [docs/config-design.md](docs/config-design.md)           |
 | **Deployment** (build, 3-node wiring, neohactl, checklists)                                 | [docs/deployment.md](docs/deployment.md)                 |
+| **Operations** (inspection, failover drills, production tuning)                               | [docs/operations.md](docs/operations.md)                 |
 | Roadmap & IT notes                                                                          | [docs/TODO.md](docs/TODO.md)                             |
 | Integration test harness                                                                    | [test/integration/README.md](test/integration/README.md) |
 
@@ -36,7 +37,13 @@ make test      # unit tests (~5 min; raft package is the slowest)
 make coverage  # unit-test coverage (~8–15 min; raft alone ~5–10 min with -covermode=atomic)
 ```
 
-CI runs `make build`, `make test`, and `make coverage-ci` on push/PR to `main` (see [.github/workflows/](.github/workflows/)).
+CI runs **`make test`** and **`make coverage-ci`** on push/PR to `main` (unit tests only; see [.github/workflows/](.github/workflows/)).
+
+**Integration tests are not run in CI** — they require a local MySQL 8.0 build, optional Xtrabackup, and SSH. Run them on a dev machine after significant changes:
+
+```bash
+make build && make test-integration
+```
 
 # Integration Tests
 

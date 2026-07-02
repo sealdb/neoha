@@ -30,6 +30,7 @@ jobs:
           cache: true
 
       - name: Generate coverage
+        # Only coordination/etcd uses -short (skip etcd server test); IT is not run in CI
         run: |
           export TERM=xterm
           export PATH="$PATH:$(go env GOPATH)/bin"

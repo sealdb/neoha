@@ -21,7 +21,7 @@ export LDFLAGS :=
 COVERAGE_OUT := coverage.out
 COVERAGE_LOG := coverage.log
 
-.PHONY: build clean install fmt test testbase testconfig testdatabase testmanager testelection testserver testcmd test-integration test-integration-prep vet coverage coverage-ci
+.PHONY: build clean install fmt test testbase testconfig testdatabase testcoordination testmanager testelection testserver testcmd test-integration test-integration-prep vet coverage coverage-ci
 
 # Optional test names after test-integration become dummy goals so make does not error.
 # Example: make test-integration TestNeoHASemiSyncWarmSuite,TestNeoHAMGRWarmSuite
@@ -62,6 +62,7 @@ test:
 	@$(MAKE) testbase
 	@$(MAKE) testconfig
 	@$(MAKE) testdatabase
+	@$(MAKE) testcoordination
 	@$(MAKE) testmanager
 	@$(MAKE) testelection
 	@$(MAKE) testserver
@@ -76,6 +77,11 @@ testconfig:
 testdatabase:
 	go test -v ./internal/database/mysql/...
 	go test -v ./internal/database/postgresql/...
+testcoordination:
+	go test -short -timeout=2m -v ./internal/coordination/etcd/...
+	go test -timeout=2m -v ./internal/coordination/raftadapter/...
+	go test -timeout=2m -v ./internal/coordination/wire/...
+	go test -timeout=2m -v ./internal/ha/...
 testmanager:
 	go test -v ./internal/manager/mysqld/...
 	# go test -v ./internal/manager/postmaster/...
@@ -123,6 +129,10 @@ PKGS =	./internal/base/common/... \
 	./internal/base/nlog/... \
 	./internal/base/nrpc/... \
 	./internal/config/... \
+	./internal/coordination/etcd/... \
+	./internal/coordination/raftadapter/... \
+	./internal/coordination/wire/... \
+	./internal/ha/... \
 	./internal/database/mysql/... \
 	./internal/database/postgresql/... \
 	./internal/manager/mysqld/... \
@@ -130,8 +140,6 @@ PKGS =	./internal/base/common/... \
 	./internal/server/... \
 	./internal/neohactl/... \
 	./api/v1/...
-		#./internal/manager/postmaster/... \
-		#./internal/election/etcd/... \
 
 vet:
 	go vet $(PKGS)
@@ -151,14 +159,21 @@ coverage-ci:
 		if [ "$$pkg" = "./internal/election/raft/..." ]; then \
 			timeout=25m; \
 			verbose=-v; \
+			short=; \
 			echo "--> Coverage $$pkg (slow: ~5–10 min with instrumentation)"; \
+		elif [ "$$pkg" = "./internal/coordination/etcd/..." ]; then \
+			timeout=2m; \
+			verbose=; \
+			short=-short; \
+			echo "--> Coverage $$pkg (-short: skip etcd server test)"; \
 		else \
 			timeout=10m; \
 			verbose=; \
+			short=; \
 			echo "--> Coverage $$pkg"; \
 		fi; \
 		go test -count=1 -timeout=$$timeout -covermode=atomic \
-			-coverprofile=$$out $$verbose $$pkg || exit 1; \
+			-coverprofile=$$out $$verbose $$short $$pkg || exit 1; \
 	done
 	@echo "--> Merging coverage profiles..."
 	@{ echo "mode: atomic"; grep -h -v '^mode:' .coverage-parts/*.out; } > ${COVERAGE_OUT}

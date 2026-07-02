@@ -496,7 +496,7 @@ Phases align with [TODO.md](./TODO.md) (open items only).
 | **v0.1.2** | ✅ | Reconciler apply + `delegate_db_apply`; mysql `Driver`; raft DB ops via dbDriver; MGR two-phase promote path |
 | **v0.1.3** | ✅ | PG `Driver` (bootstrap/promote/demote); `primary_hooks`; PG + Raft IT |
 | **v0.1.4** | ✅ | etcd Coordinator MVP; PG ApplyReplica / pg_rewind / lag; MGR majority-loss; IT warm fixtures; HA docs |
-| **v0.2.0** | ⏳ merge → tag | GitHub **Release** bundling v0.1.1–v0.1.4 (this PR) |
+| **v0.2.0** | ✅ tagged | GitHub **Release** bundling v0.1.1–v0.1.4 + config/IT/ops docs |
 | **v0.3.0** | — | REST cluster API; dynamic config in DCS |
 | **v1.0.0** | — | Production readiness criteria **TBD** (docs, auth, matrix green, schema stable) |
 

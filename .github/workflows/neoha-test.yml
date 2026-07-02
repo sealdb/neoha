@@ -30,6 +30,7 @@ jobs:
           cache: true
 
       - name: Unit test
+        # Integration tests (MySQL/Xtrabackup/SSH) are manual-only; see test/integration/README.md
         run: |
           export TERM=xterm
           export PATH="$PATH:$(go env GOPATH)/bin"

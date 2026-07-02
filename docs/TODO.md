@@ -8,6 +8,7 @@
 > | [config-design.md](./config-design.md) | 目标 `coordination.*` schema、校验、与 `election.*` 迁移 |
 > | [ha-failover.md](./ha-failover.md) | MySQL 3 节点 semi-sync / MGR 切换与时序图 |
 > | [deployment.md](./deployment.md) | 编译安装、三节点组网、neohactl、检查清单 |
+> | [operations.md](./operations.md) | 巡检、failover 演练、生产调参 |
 > | [test/integration/README.md](../test/integration/README.md) | IT harness、环境、`make test-integration` |
 > | `internal/database/driver/` | L4 数据库抽象接口 |
 
@@ -16,6 +17,14 @@
 ---
 
 ## P0 — 进行中
+
+### CI 策略
+
+| 决策 | 说明 |
+|------|------|
+| **单元测试** | GitHub Actions `make test` + `make coverage-ci`（含 coordination/ha/postgresql） |
+| **集成测试** | **不在 CI** 运行；需本机 MySQL / Xtrabackup / SSH，变更后在开发机 `make test-integration` |
+| **etcd 单测** | `TestEtcdCoordinatorLeaderElection` 需本地 `etcd` 或 `NEOHA_ETCD_BIN`；仅该包在 `make test` 中带 `-short` skip |
 
 ### 质量门禁 — 单元测试
 
@@ -42,6 +51,9 @@ go test $(go list ./... | grep -v test/integration)
 | [x] | 跨测试复用 datadir | 稳定 cluster 名 + 默认保留 workdir；`make test-integration-prep` 预初始化 |
 | [x] | Makefile 默认 `NEOHA_IT_BIN` | `make test-integration` / `make test-integration-prep` 依赖 `make build`，默认 `./bin/neoha` |
 | [x] | 文档：failover 段 baseline | [test/integration/README.md](../test/integration/README.md) § Failover segment baseline |
+| [x] | etcd 单测 CI 安全 | 仅 `coordination/etcd` 使用 `-short` skip；`waitEtcdReady` 探活 |
+| [x] | coverage 补洞 | `internal/coordination/...`、`internal/ha/...`、`internal/database/postgresql/...` |
+| [x] | 运维手册 | [operations.md](./operations.md) |
 
 **实测 baseline（2026-06-29，WSL，datadir 已存在，bin 预编译）**：
 
@@ -211,8 +223,8 @@ make test-integration
 
 | 项 | 说明 |
 |-----|------|
-| 运维手册 | 巡检、failover 演练、故障处理（部署见 [deployment.md](./deployment.md)） |
-| 生产调参指南 | heartbeat / election / MGR quorum 与 RPO/RTO |
+| ~~运维手册~~ | ✅ [operations.md](./operations.md) |
+| 生产调参指南 | 已并入 operations.md §3；可按场景拆独立页 |
 
 ### 代码质量
 
@@ -234,4 +246,4 @@ make test-integration
 | 2026-06-29 | 重组文档结构：P0 仅未完成项；里程碑按 L2/L3/L4 归档；backlog 去重 |
 | 2026-06-29 | 新增 [deployment.md](./deployment.md) |
 | 2026-06-29 | 版本号对齐：dev 里程碑 v0.1.1–v0.1.4，PR 合并后打 tag **v0.2.0** |
-| 2026-07-01 | 阶段 1：config 对齐 config-design；test-integration-prep + 默认 bin + datadir 复用 |
+| 2026-07-01 | 阶段 1：config 对齐；IT 工程化；CI 仅 unit；[operations.md](./operations.md) |

@@ -1,6 +1,6 @@
 # NeoHA 部署指南
 
-> **状态：** 手工三节点部署流程（无 Ansible/Helm 一键包）。配置字段详见 [config-design.md](./config-design.md)；切换行为见 [ha-failover.md](./ha-failover.md)。
+> **状态：** 手工三节点部署流程（无 Ansible/Helm 一键包）。配置字段详见 [config-design.md](./config-design.md)；切换行为见 [ha-failover.md](./ha-failover.md)；上线后运维见 [operations.md](./operations.md)。
 
 ---
 
